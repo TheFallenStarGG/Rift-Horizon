@@ -20,8 +20,41 @@ env:
   THREE_VERSION: '0.170.0'
 
 jobs:
+  # Flip BUILD_RELEASE in the repo root to True to allow APK/EXE builds.
+  # Anything other than True (case-insensitive) cancels the expensive jobs.
+  gate:
+    name: Build gate
+    runs-on: ubuntu-latest
+    outputs:
+      should_build: ${{ steps.check.outputs.should_build }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read BUILD_RELEASE flag
+        id: check
+        run: |
+          set -e
+          FLAG_FILE="BUILD_RELEASE"
+          if [ ! -f "$FLAG_FILE" ]; then
+            echo "No $FLAG_FILE in repo — treating as False (skip builds)"
+            echo "should_build=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # Strip whitespace / BOM; accept True / true / TRUE only
+          VAL=$(tr -d '\r' < "$FLAG_FILE" | head -1 | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]')
+          echo "BUILD_RELEASE raw value: [$VAL]"
+          if [ "$VAL" = "true" ]; then
+            echo "should_build=true" >> "$GITHUB_OUTPUT"
+            echo "Gate OPEN — builds will run"
+          else
+            echo "should_build=false" >> "$GITHUB_OUTPUT"
+            echo "Gate CLOSED — BUILD_RELEASE is not True; skipping APK/EXE/release"
+          fi
+
   windows:
     name: Windows EXE
+    needs: gate
+    if: needs.gate.outputs.should_build == 'true'
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -72,6 +105,8 @@ jobs:
 
   android:
     name: Android APK
+    needs: gate
+    if: needs.gate.outputs.should_build == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -332,7 +367,8 @@ jobs:
 
   release:
     name: GitHub Release
-    needs: [windows, android]
+    needs: [gate, windows, android]
+    if: needs.gate.outputs.should_build == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
