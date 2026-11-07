@@ -106,7 +106,7 @@ jobs:
           retention-days: 14
 
   macos:
-    name: macOS (DMG Intel + Apple Silicon)
+    name: macOS (ZIP Intel + Apple Silicon)
     needs: gate
     if: needs.gate.outputs.should_build == 'true'
     runs-on: macos-latest
@@ -153,7 +153,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: macos-desktop
-          path: desktop/dist/*.dmg
+          path: desktop/dist/*.zip
           if-no-files-found: error
           retention-days: 14
 
@@ -558,8 +558,8 @@ jobs:
             echo "|------|------------|"
             echo "| \`RiftHorizon-…-Windows-Portable-x64.exe\` | **Windows portable** — no install, double-click to run |"
             echo "| \`RiftHorizon-…-Windows-Setup-Installer-x64.exe\` | **Windows setup** — installer with Start Menu + desktop shortcuts |"
-            echo "| \`RiftHorizon-…-macOS-x64.dmg\` | **macOS Intel** — open the DMG, drag the app to Applications |"
-            echo "| \`RiftHorizon-…-macOS-arm64.dmg\` | **macOS Apple Silicon** (M1/M2/M3/M4) |"
+            echo "| \`RiftHorizon-…-macOS-x64.zip\` | **macOS Intel** — unzip, right-click the app → Open (unsigned) |"
+            echo "| \`RiftHorizon-…-macOS-arm64.zip\` | **macOS Apple Silicon** (M1/M2/M3/M4) — unzip, right-click → Open |"
             echo "| \`RiftHorizon-…-Linux-x64.AppImage\` | **Linux AppImage** — chmod +x then run (no install) |"
             echo "| \`RiftHorizon-…-Linux-x64.deb\` | **Linux deb** — for Debian/Ubuntu (\`sudo dpkg -i …\`) |"
             echo "| \`RiftHorizon-…-android.apk\` | **Android** — signed release APK (landscape) |"
