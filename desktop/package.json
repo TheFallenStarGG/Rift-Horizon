@@ -2,9 +2,13 @@
   "name": "rift-horizon",
   "version": "0.4.0",
   "description": "Rift Horizon desktop",
-  "main": "main.js",
-  "author": "TheFallenStarGG",
+  "homepage": "https://github.com/TheFallenStarGG/Rift-Horizon",
+  "author": {
+    "name": "TheFallenStarGG",
+    "email": "DarkstarGaming23266@proton.me"
+  },
   "license": "UNLICENSED",
+  "main": "main.js",
   "scripts": {
     "start": "electron .",
     "dist": "electron-builder --win",
@@ -62,21 +66,22 @@
       "category": "public.app-category.games",
       "target": [
         {
-          "target": "dmg",
+          "target": "zip",
           "arch": ["x64", "arm64"]
         }
       ],
       "hardenedRuntime": false,
       "gatekeeperAssess": false,
-      "identity": null
-    },
-    "dmg": {
-      "artifactName": "RiftHorizon-${version}-macOS-${arch}.dmg",
-      "title": "Rift Horizon ${version}"
+      "identity": null,
+      "artifactName": "RiftHorizon-${version}-macOS-${arch}.zip"
     },
     "linux": {
       "icon": "../favicon.png",
       "category": "Game",
+      "maintainer": "TheFallenStarGG <thefallenstargg@users.noreply.github.com>",
+      "vendor": "TheFallenStarGG",
+      "synopsis": "Rift Horizon",
+      "description": "Rift Horizon desktop build",
       "target": [
         {
           "target": "AppImage",
@@ -93,7 +98,8 @@
     },
     "deb": {
       "artifactName": "RiftHorizon-${version}-Linux-x64.deb",
-      "depends": []
+      "depends": [],
+      "packageCategory": "games"
     }
   },
   "devDependencies": {
