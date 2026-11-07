@@ -1,4 +1,4 @@
-# Builds Windows EXE + Android APK, vendors Three.js offline, auto-versions, releases.
+# Builds Windows / macOS / Linux desktop + Android APK, vendors Three.js offline, auto-versions, releases.
 name: Build & Release
 
 on:
@@ -48,11 +48,11 @@ jobs:
             echo "Gate OPEN — builds will run"
           else
             echo "should_build=false" >> "$GITHUB_OUTPUT"
-            echo "Gate CLOSED — BUILD_RELEASE is not True; skipping APK/EXE/release"
+            echo "Gate CLOSED — BUILD_RELEASE is not True; skipping desktop/APK/release"
           fi
 
   windows:
-    name: Windows EXE
+    name: Windows (Portable + Setup Installer)
     needs: gate
     if: needs.gate.outputs.should_build == 'true'
     runs-on: windows-latest
@@ -98,8 +98,112 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: windows-exe
-          path: desktop/dist/*.exe
+          name: windows-desktop
+          path: |
+            desktop/dist/*Windows-Portable*.exe
+            desktop/dist/*Windows-Setup*.exe
+          if-no-files-found: error
+          retention-days: 14
+
+  macos:
+    name: macOS (DMG Intel + Apple Silicon)
+    needs: gate
+    if: needs.gate.outputs.should_build == 'true'
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: desktop/package.json
+
+      - name: Vendor Three.js (offline)
+        run: |
+          chmod +x scripts/vendor-three.sh scripts/use-local-three.sh
+          ./scripts/vendor-three.sh
+          ./scripts/use-local-three.sh index.html
+
+      - name: Stage game for Electron
+        run: |
+          set -e
+          rm -rf _game_stage
+          mkdir -p _game_stage
+          for item in index.html game.js favicon.png apple-touch-icon.png og.png lib assets vendor; do
+            [ -e "$item" ] && cp -a "$item" _game_stage/
+          done
+          echo "${{ env.APP_VERSION }}" > _game_stage/version.txt
+          node -e "const p=require('./desktop/package.json');p.version=process.env.APP_VERSION;require('fs').writeFileSync('./desktop/package.json',JSON.stringify(p,null,2))"
+        env:
+          APP_VERSION: ${{ env.APP_VERSION }}
+
+      - name: Install & build
+        working-directory: desktop
+        run: |
+          npm install
+          npx electron-builder --mac
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+          # Unsigned DMG is fine for GitHub Releases; users may need right-click → Open the first time
+          APPLE_API_KEY: ''
+          APPLE_API_KEY_ID: ''
+          APPLE_API_ISSUER: ''
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-desktop
+          path: desktop/dist/*.dmg
+          if-no-files-found: error
+          retention-days: 14
+
+  linux:
+    name: Linux (AppImage + deb)
+    needs: gate
+    if: needs.gate.outputs.should_build == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: desktop/package.json
+
+      - name: Vendor Three.js (offline)
+        run: |
+          chmod +x scripts/vendor-three.sh scripts/use-local-three.sh
+          ./scripts/vendor-three.sh
+          ./scripts/use-local-three.sh index.html
+
+      - name: Stage game for Electron
+        run: |
+          set -e
+          rm -rf _game_stage
+          mkdir -p _game_stage
+          for item in index.html game.js favicon.png apple-touch-icon.png og.png lib assets vendor; do
+            [ -e "$item" ] && cp -a "$item" _game_stage/
+          done
+          echo "${{ env.APP_VERSION }}" > _game_stage/version.txt
+          node -e "const p=require('./desktop/package.json');p.version=process.env.APP_VERSION;require('fs').writeFileSync('./desktop/package.json',JSON.stringify(p,null,2))"
+        env:
+          APP_VERSION: ${{ env.APP_VERSION }}
+
+      - name: Install & build
+        working-directory: desktop
+        run: |
+          npm install
+          npx electron-builder --linux
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-desktop
+          path: |
+            desktop/dist/*.AppImage
+            desktop/dist/*.deb
           if-no-files-found: error
           retention-days: 14
 
@@ -367,7 +471,7 @@ jobs:
 
   release:
     name: GitHub Release
-    needs: [gate, windows, android]
+    needs: [gate, windows, macos, linux, android]
     if: needs.gate.outputs.should_build == 'true'
     runs-on: ubuntu-latest
     steps:
@@ -375,10 +479,22 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Download Windows EXE
+      - name: Download Windows desktop
         uses: actions/download-artifact@v4
         with:
-          name: windows-exe
+          name: windows-desktop
+          path: release-assets
+
+      - name: Download macOS desktop
+        uses: actions/download-artifact@v4
+        with:
+          name: macos-desktop
+          path: release-assets
+
+      - name: Download Linux desktop
+        uses: actions/download-artifact@v4
+        with:
+          name: linux-desktop
           path: release-assets
 
       - name: Download Android APK
@@ -436,8 +552,19 @@ jobs:
             echo ""
             echo "**v${{ env.APP_VERSION }}** · \`${{ github.ref_name }}\` · \`${{ github.sha }}\`"
             echo ""
-            echo "- **Windows:** portable + setup \`.exe\` (Three.js offline)"
-            echo "- **Android:** signed release \`.apk\` landscape (Three.js offline)"
+            echo "### Downloads"
+            echo ""
+            echo "| File | What it is |"
+            echo "|------|------------|"
+            echo "| \`RiftHorizon-…-Windows-Portable-x64.exe\` | **Windows portable** — no install, double-click to run |"
+            echo "| \`RiftHorizon-…-Windows-Setup-Installer-x64.exe\` | **Windows setup** — installer with Start Menu + desktop shortcuts |"
+            echo "| \`RiftHorizon-…-macOS-x64.dmg\` | **macOS Intel** — open the DMG, drag the app to Applications |"
+            echo "| \`RiftHorizon-…-macOS-arm64.dmg\` | **macOS Apple Silicon** (M1/M2/M3/M4) |"
+            echo "| \`RiftHorizon-…-Linux-x64.AppImage\` | **Linux AppImage** — chmod +x then run (no install) |"
+            echo "| \`RiftHorizon-…-Linux-x64.deb\` | **Linux deb** — for Debian/Ubuntu (\`sudo dpkg -i …\`) |"
+            echo "| \`RiftHorizon-…-android.apk\` | **Android** — signed release APK (landscape) |"
+            echo ""
+            echo "All desktop builds ship with Three.js vendored offline."
           } > /tmp/body.md
           echo "path=/tmp/body.md" >> "$GITHUB_OUTPUT"
           cat /tmp/body.md
