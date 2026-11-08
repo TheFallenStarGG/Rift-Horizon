@@ -81,7 +81,7 @@ let dropship = null;
 
 // ---------- renderer / world ----------
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: !isTouch && settings.aa, powerPreference: 'high-performance' });
-renderer.setPixelRatio(Math.min(devicePixelRatio, isTouch ? 1.5 : 2)); // gfx.apply() applies the render-scale setting
+renderer.setPixelRatio(Math.min(devicePixelRatio || 1, Number(settings.maxDpr) || (isTouch ? 1.25 : 1.5))); // gfx.apply() applies scale + maxDpr
 renderer.setSize(innerWidth, innerHeight, false);
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
@@ -943,6 +943,29 @@ function frame(nowMs) {
   last = nowMs;
   const interact = input.consumeInteract();
   LOD.on = !!settings.animLod; LOD.x = player.x; LOD.z = player.z;
+  LOD.simpleVm = !!settings.simpleVm;
+  // Hide far characters when charCull > 0 (metres)
+  {
+    const cull = Number(settings.charCull) || 0;
+    if (cull > 0) {
+      const c2 = cull * cull;
+      if (where === 'bots') {
+        for (const e of enemies) {
+          if (!e.mesh) continue;
+          const dx = e.mesh.position.x - player.x, dz = e.mesh.position.z - player.z;
+          const far = dx * dx + dz * dz > c2;
+          if (e.alive) e.mesh.visible = !far;
+        }
+      }
+      for (const r of remotes.values()) {
+        if (!r.mesh) continue;
+        const dx = r.x - player.x, dz = r.z - player.z;
+        const far = dx * dx + dz * dz > c2;
+        r.mesh.visible = r.alive && !far;
+        if (r.tag) r.tag.visible = r.mesh.visible;
+      }
+    }
+  }
   gfx.tick(raw);
 
   if (running) {
