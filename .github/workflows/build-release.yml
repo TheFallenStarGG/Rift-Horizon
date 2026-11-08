@@ -3,8 +3,9 @@ name: Build & Release
 
 on:
   push:
-    branches: [main, master, Update-4]
-    paths-ignore: ['**.md', '.gitignore']
+    branches: [main, master, Update-4, Update-5]
+    # version.txt bumps are committed by this workflow — ignore so we don't loop
+    paths-ignore: ['**.md', '.gitignore', 'version.txt']
   workflow_dispatch: {}
 
 concurrency:
@@ -15,9 +16,8 @@ permissions:
   contents: write
 
 env:
-  # Auto version: 0.4.<run_number>
-  APP_VERSION: 0.4.${{ github.run_number }}
   THREE_VERSION: '0.170.0'
+  # APP_VERSION comes from version.txt via the gate job (needs.gate.outputs.app_version)
 
 jobs:
   # Flip BUILD_RELEASE in the repo root to True to allow APK/EXE builds.
@@ -27,8 +27,26 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       should_build: ${{ steps.check.outputs.should_build }}
+      app_version: ${{ steps.ver.outputs.app_version }}
     steps:
       - uses: actions/checkout@v4
+
+      - name: Read version.txt
+        id: ver
+        run: |
+          set -e
+          if [ ! -f version.txt ]; then
+            echo "0.5.0" > version.txt
+            echo "No version.txt — seeded 0.5.0"
+          fi
+          # strip whitespace / optional leading v
+          V=$(tr -d '\r' < version.txt | head -1 | tr -d ' \t' | sed 's/^[vV]//')
+          if ! echo "$V" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "version.txt must be major.minor.patch (got: '$V')"
+            exit 1
+          fi
+          echo "app_version=$V" >> "$GITHUB_OUTPUT"
+          echo "This build will be v$V"
 
       - name: Read BUILD_RELEASE flag
         id: check
@@ -81,11 +99,11 @@ jobs:
           for item in index.html game.js favicon.png apple-touch-icon.png og.png lib assets vendor; do
             [ -e "$item" ] && cp -a "$item" _game_stage/
           done
-          echo "${{ env.APP_VERSION }}" > _game_stage/version.txt
+          echo "${{ needs.gate.outputs.app_version }}" > _game_stage/version.txt
           # stamp desktop package version
           node -e "const p=require('./desktop/package.json');p.version=process.env.APP_VERSION;require('fs').writeFileSync('./desktop/package.json',JSON.stringify(p,null,2))"
         env:
-          APP_VERSION: ${{ env.APP_VERSION }}
+          APP_VERSION: ${{ needs.gate.outputs.app_version }}
 
       - name: Install & build
         working-directory: desktop
@@ -133,10 +151,10 @@ jobs:
           for item in index.html game.js favicon.png apple-touch-icon.png og.png lib assets vendor; do
             [ -e "$item" ] && cp -a "$item" _game_stage/
           done
-          echo "${{ env.APP_VERSION }}" > _game_stage/version.txt
+          echo "${{ needs.gate.outputs.app_version }}" > _game_stage/version.txt
           node -e "const p=require('./desktop/package.json');p.version=process.env.APP_VERSION;require('fs').writeFileSync('./desktop/package.json',JSON.stringify(p,null,2))"
         env:
-          APP_VERSION: ${{ env.APP_VERSION }}
+          APP_VERSION: ${{ needs.gate.outputs.app_version }}
 
       - name: Install & build
         working-directory: desktop
@@ -185,10 +203,10 @@ jobs:
           for item in index.html game.js favicon.png apple-touch-icon.png og.png lib assets vendor; do
             [ -e "$item" ] && cp -a "$item" _game_stage/
           done
-          echo "${{ env.APP_VERSION }}" > _game_stage/version.txt
+          echo "${{ needs.gate.outputs.app_version }}" > _game_stage/version.txt
           node -e "const p=require('./desktop/package.json');p.version=process.env.APP_VERSION;require('fs').writeFileSync('./desktop/package.json',JSON.stringify(p,null,2))"
         env:
-          APP_VERSION: ${{ env.APP_VERSION }}
+          APP_VERSION: ${{ needs.gate.outputs.app_version }}
 
       - name: Install & build
         working-directory: desktop
@@ -285,7 +303,7 @@ jobs:
             [ -e "$item" ] && cp -a "$item" www/
           done
           ./scripts/use-local-three.sh www/index.html
-          echo "${{ env.APP_VERSION }}" > www/version.txt
+          echo "${{ needs.gate.outputs.app_version }}" > www/version.txt
           # inject native back hook
           if [ -f scripts/native-bridge-snippet.js ]; then
             cat scripts/native-bridge-snippet.js >> www/game.js
@@ -360,7 +378,7 @@ jobs:
 
           # versionName
           if [ -f android/app/build.gradle ]; then
-            sed -i "s/versionName \".*\"/versionName \"${{ env.APP_VERSION }}\"/" android/app/build.gradle || true
+            sed -i "s/versionName \".*\"/versionName \"${{ needs.gate.outputs.app_version }}\"/" android/app/build.gradle || true
           fi
 
       - name: Cache / create persistent signing keystore
@@ -459,7 +477,7 @@ jobs:
           mkdir -p out
           APK=$(find android/app/build/outputs/apk/release -name '*.apk' | head -n 1)
           test -n "$APK"
-          cp "$APK" "out/RiftHorizon-${{ env.APP_VERSION }}-android.apk"
+          cp "$APK" "out/RiftHorizon-${{ needs.gate.outputs.app_version }}-android.apk"
           ls -la out
 
       - uses: actions/upload-artifact@v4
@@ -478,6 +496,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Download Windows desktop
         uses: actions/download-artifact@v4
@@ -550,7 +569,7 @@ jobs:
             echo ""
             echo "---"
             echo ""
-            echo "**v${{ env.APP_VERSION }}** · \`${{ github.ref_name }}\` · \`${{ github.sha }}\`"
+            echo "**v${{ needs.gate.outputs.app_version }}** · \`${{ github.ref_name }}\` · \`${{ github.sha }}\`"
             echo ""
             echo "### Downloads"
             echo ""
@@ -573,14 +592,37 @@ jobs:
         if: steps.debounce.outputs.skip != 'true'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v${{ env.APP_VERSION }}
-          name: Rift Horizon v${{ env.APP_VERSION }}
+          tag_name: v${{ needs.gate.outputs.app_version }}
+          name: Rift Horizon v${{ needs.gate.outputs.app_version }}
           body_path: ${{ steps.notes.outputs.path }}
           files: release-assets/*
           fail_on_unmatched_files: true
           generate_release_notes: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+
+      - name: Bump version.txt for next build
+        if: steps.debounce.outputs.skip != 'true'
+        run: |
+          set -e
+          V=$(tr -d '\r' < version.txt | head -1 | tr -d ' \t' | sed 's/^[vV]//')
+          MA=$(echo "$V" | cut -d. -f1)
+          MI=$(echo "$V" | cut -d. -f2)
+          PA=$(echo "$V" | cut -d. -f3)
+          PA=$((PA + 1))
+          NEXT="${MA}.${MI}.${PA}"
+          echo "$NEXT" > version.txt
+          echo "Bumped version.txt: $V → $NEXT"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add version.txt
+          if git diff --staged --quiet; then
+            echo "No change to commit"
+          else
+            git commit -m "chore: bump version to ${NEXT} [skip ci]"
+            git push origin "HEAD:${{ github.ref_name }}"
+          fi
 
       - name: Debounce notice
         if: steps.debounce.outputs.skip == 'true'
