@@ -523,9 +523,9 @@ body.mobile #hpNum { font-size:22px; } body.mobile #ammoBox { bottom:auto; top:c
 body.mobile #pips, body.mobile #camMode, body.mobile #stance, body.mobile #playerList, body.mobile #hint { display:none; }
 body.mobile #score { top:calc(10px + var(--sa)); } body.mobile #killfeed { top:calc(10px + var(--sa)); right:12px; }
 body.mobile #status { top:calc(44px + var(--sa)); }
-body.mobile #slots { bottom:auto; top:calc(70px + var(--sa)); left:50%; } body.mobile .slot { min-width:0; padding:4px 8px; }
+body.mobile #slots { bottom:auto; top:calc(70px + var(--sa)); left:50%; flex-wrap:nowrap; } body.mobile .slot { min-width:0; padding:4px 7px; white-space:nowrap; flex:0 0 auto; }
 body.mobile #prompt { bottom:auto; top:calc(110px + var(--sa)); }
-body.mobile #buildBar { bottom:calc(130px + var(--sb)); }
+body.mobile #buildBar { /* position owned by hudLayout BC zone */ }
 body.mobile #chatWrap { left:12px; bottom:auto; top:calc(116px + var(--sa)); width:44vw; z-index:6; } body.mobile #chatLog { max-height:70px; }
 body.mobile #fps { top:auto; bottom:calc(8px + var(--sb)); left:50%; transform:translateX(-50%); }
 body.mobile #chatForm { opacity:1; pointer-events:auto; }
