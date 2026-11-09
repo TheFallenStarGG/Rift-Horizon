@@ -75,7 +75,7 @@ const lockPointer = () => { if (!isTouch) { try { canvas.requestPointerLock(); }
 const isMulti = () => where === 'multi';
 
 // ---------- hot drop intro (lib/dropship.js) ----------
-const DROP_BOUND = 290; // the worker clamps players to ±298 (BOUND in worker/src/index.js): keep the drop zone inside it
+const DROP_BOUND = 5600; 
 const DROP_ENABLED = !/[?&]nodrop\b/.test(location.search); // add ?nodrop to the URL to skip the plane
 let dropship = null;
 
