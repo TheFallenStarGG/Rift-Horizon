@@ -8,6 +8,7 @@ import { createRadar } from './lib/radar.js';
 import { createVehicles } from './lib/vehicles.js';
 import { createDrone } from './lib/drone.js';
 import { createLottery } from './lib/lottery.js';
+import { createSummon } from './lib/summon.js';
 import { makeHumanoid, makeViewmodel } from './lib/humanoid.js';
 import { createBulletSystem } from './lib/weapons.js';
 import { createHud } from './lib/hud.js';
@@ -565,8 +566,14 @@ function onBuildTier() {
 }
 
 await _step(93, 'Binding controls & combat…');
+
+const summon = createSummon({
+  scene, hud, audio, camera, vehicles,
+  playAnim: () => { triggerMelee(viewmodel, 'swing'); triggerMelee(playerMesh, 'swing'); },
+});
+
 ctrl = createPlayerController({
-  scene, camera, playerMesh, viewmodel, player, input, bullets, hud, audio, build, world, net, drone, lottery,
+  scene, camera, playerMesh, viewmodel, player, input, bullets, hud, audio, build, world, net, drone, lottery, summon,
   getEnemies: () => (where === 'bots' ? enemies : []),
   getRemotes: () => remotes,
   isMulti,
