@@ -455,6 +455,9 @@ await _step(88, 'Constructing lobby…');
 const lobby = createLobby(scene, tex, {
   onEquip: () => { ctrl.refreshLoadout(); refreshSlotsUI(); audio.play('click'); },
   onRangeHit: (bull) => { audio.play(bull ? 'headshot' : 'hit'); hud.hitMarker(bull ? 'head' : 'hit'); },
+  camera, viewmodel, playerMesh,
+  getInput: () => input,
+  getFov: () => settings.fov,
 });
 
 // ---------- bots ----------
@@ -1045,6 +1048,7 @@ function frame(nowMs) {
       }
       if (aircraft.isPiloting() && input.consumeCmds) input.consumeCmds(); // Z/X/B/G build shortcuts do nothing in a cockpit
       if (dropping) dropship.update(dt);
+      else if (where === 'lobby' && lobby.cutsceneOn()) dropship.tick(dt); // a lobby cutscene owns the camera
       else { dropship.tick(dt); ctrl.update(dt); }
       if (infiniteAmmo() && player.alive) { player.ammo = player.magSize; }
       if (!player.alive && drone.isActive()) drone.recall();
