@@ -2,7 +2,7 @@
   "model": "eleven_multilingual_v2",
   "voices": {
     "narrator": "pNInz6obpgDQGcFmaJgB",
-    "radio": "TxGEqnHWrfWFTfGW9XjX"
+    "radio": "0gFBvPOVRQUgd9ZaaSHG"
   },
   "lines": [
     { "id": "n01", "voice": "narrator", "at": 1.2,  "text": "Every world has a breaking point.", "stability": 0.4, "style": 0.55 },
