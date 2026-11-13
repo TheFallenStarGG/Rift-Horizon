@@ -30,6 +30,7 @@ import { look, applyLook, decodeLook } from './lib/look.js';
 import { canon } from './lib/keybinds.js';
 import { createGfx } from './lib/gfx.js';
 import { createDropship } from './lib/dropship.js';
+import { createTrailer } from './lib/trailer.js';
 import { initUpdater, isForcedOffline, checkForUpdate, showUpdateModal, refreshOfflineBanner, isWebClient } from './lib/update.js';
 import {
   devUnlocked, tryUnlock, checkCallsign, bindDev, mountDevSettingsSection,
@@ -909,6 +910,7 @@ btnStart.addEventListener('click', () => {
   input.clear();
   joinGlobalLobby();
   lockPointer();
+  if (/[?&]trailer\b/.test(location.search)) setTimeout(() => trailer.start(), 600); // phone: open the game with ?trailer
 });
 $('btnSettingsStart').addEventListener('click', openPanel);
 $('btnLoadoutStart').addEventListener('click', openLoadout);
@@ -919,7 +921,7 @@ btnLobby.addEventListener('click', () => { closePanel(); enterLobby('Back in the
 $('btnPause').addEventListener('click', () => { if (running) openPanel(); });
 document.addEventListener('pointerlockchange', () => {
   if (isTouch) return;
-  if (document.pointerLockElement !== canvas && running && !panelOpen && !loadoutOpen && !chatFocused()) openPanel();
+  if (document.pointerLockElement !== canvas && running && !panelOpen && !loadoutOpen && !chatFocused() && !trailer.active) openPanel();
 });
 
 // ---------- chat ----------
@@ -1008,6 +1010,13 @@ function frame(nowMs) {
   const raw = (nowMs - last) / 1000;
   const dt = Math.min(0.05, raw);
   last = nowMs;
+  if (trailer.active) {
+    trailer.update(raw);
+    gfx.tick(raw);
+    gfx.render(false);
+    recorder.frame(nowMs);
+    return;
+  }
   const interact = input.consumeInteract();
   LOD.on = !!settings.animLod; LOD.x = player.x; LOD.z = player.z;
   LOD.simpleVm = !!settings.simpleVm;
@@ -1168,6 +1177,16 @@ initMenus({
   },
 });
 applyLayout();
+
+const trailer = createTrailer({
+  scene, camera, tex, audio, bullets, vehicles, world, gfx, makeHumanoid, playerMesh, viewmodel,
+  onStop: () => lockPointer(),
+});
+addEventListener('keydown', (e) => {
+  if (e.code !== 'F8' || !running || chatFocused()) return;
+  e.preventDefault();
+  if (trailer.active) trailer.stop(); else trailer.start();
+});
 
 // ---------- boot ----------
 await _step(97, 'Finalizing session…');
