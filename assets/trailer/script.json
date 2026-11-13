@@ -1,0 +1,23 @@
+{
+  "model": "eleven_multilingual_v2",
+  "voices": {
+    "narrator": "pNInz6obpgDQGcFmaJgB",
+    "radio": "TxGEqnHWrfWFTfGW9XjX"
+  },
+  "lines": [
+    { "id": "n01", "voice": "narrator", "at": 1.2,  "text": "Every world has a breaking point.", "stability": 0.4, "style": 0.55 },
+    { "id": "n02", "voice": "narrator", "at": 4.2,  "text": "A line no one was ever meant to cross.", "stability": 0.4, "style": 0.55 },
+    { "id": "r01", "voice": "radio",    "at": 15.4, "text": "Contact front! All units, weapons free!", "stability": 0.3, "style": 0.4, "speed": 1.1 },
+    { "id": "r04", "voice": "radio",    "at": 19.8, "text": "Reloading! Cover me!", "stability": 0.3, "style": 0.4, "speed": 1.1 },
+    { "id": "n03", "voice": "narrator", "at": 23.4, "text": "They said the map had no end.", "stability": 0.4, "style": 0.55 },
+    { "id": "n04", "voice": "narrator", "at": 27.0, "text": "So we built the machines to find it.", "stability": 0.4, "style": 0.55 },
+    { "id": "r02", "voice": "radio",    "at": 34.0, "text": "Truck's moving. Take it out!", "stability": 0.3, "style": 0.4, "speed": 1.1 },
+    { "id": "r03", "voice": "radio",    "at": 43.0, "text": "Drone's up. I've got eyes on the field.", "stability": 0.3, "style": 0.4, "speed": 1.05 },
+    { "id": "n05", "voice": "narrator", "at": 47.2, "text": "And some things... defy explanation.", "stability": 0.4, "style": 0.6 },
+    { "id": "n06", "voice": "narrator", "at": 52.7, "text": "Arm yourself.", "stability": 0.4, "style": 0.6 },
+    { "id": "n07", "voice": "narrator", "at": 58.5, "text": "Take the wheel.", "stability": 0.4, "style": 0.6 },
+    { "id": "n08", "voice": "narrator", "at": 64.9, "text": "Every second counts.", "stability": 0.35, "style": 0.65 },
+    { "id": "n09", "voice": "narrator", "at": 69.0, "text": "This is where legends are made.", "stability": 0.35, "style": 0.65 },
+    { "id": "n10", "voice": "narrator", "at": 77.6, "text": "Rift Horizon.", "stability": 0.3, "style": 0.7 }
+  ]
+}
