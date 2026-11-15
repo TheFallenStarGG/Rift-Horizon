@@ -1,0 +1,133 @@
+name: Render trailer (self-recording)
+
+on:
+  workflow_dispatch:
+    inputs:
+      width:
+        description: 'Video width in px'
+        default: '1920'
+      height:
+        description: 'Video height in px'
+        default: '1080'
+      fps:
+        description: 'Frames per second (30 or 60)'
+        default: '30'
+      shards:
+        description: 'Parallel render jobs (1-20)'
+        default: '12'
+      audio_secs:
+        description: 'Audio buffer length in seconds (must be longer than the trailer)'
+        default: '130'
+
+permissions:
+  contents: read
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      list: ${{ steps.p.outputs.list }}
+      count: ${{ steps.p.outputs.count }}
+    steps:
+      - id: p
+        env:
+          N: ${{ inputs.shards }}
+        run: |
+          if ! [[ "$N" =~ ^[0-9]+$ ]]; then N=12; fi
+          if [ "$N" -lt 1 ]; then N=1; fi
+          if [ "$N" -gt 20 ]; then N=20; fi
+          echo "count=$N" >> "$GITHUB_OUTPUT"
+          echo "list=$(seq 0 $((N-1)) | paste -sd, - | sed 's/^/[/;s/$/]/')" >> "$GITHUB_OUTPUT"
+
+  render:
+    needs: plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    strategy:
+      fail-fast: true
+      matrix:
+        shard: ${{ fromJSON(needs.plan.outputs.list) }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: System packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg fonts-liberation fonts-dejavu-core
+
+      - name: Vendor three.js (the render runs with no internet)
+        run: |
+          VER=$(grep -o 'three@[0-9][0-9.]*' index.html | head -1 | cut -d@ -f2)
+          echo "three version: ${VER:-unknown}"
+          THREE_VERSION="${VER:-0.170.0}" bash scripts/vendor-three.sh
+          bash scripts/use-local-three.sh
+
+      - name: Install Playwright
+        working-directory: scripts/render
+        run: |
+          npm install --no-audit --no-fund
+          npx playwright install --with-deps chromium
+
+      - name: Render this shard
+        env:
+          RT_WIDTH: ${{ inputs.width }}
+          RT_HEIGHT: ${{ inputs.height }}
+          RT_FPS: ${{ inputs.fps }}
+          RT_SHARD: ${{ matrix.shard }}
+          RT_SHARDS: ${{ needs.plan.outputs.count }}
+          RT_AUDIO_SECS: ${{ inputs.audio_secs }}
+        run: node scripts/render/render-trailer.mjs
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: trailer-part-${{ matrix.shard }}
+          path: render-out/
+          retention-days: 1
+
+  merge:
+    needs: render
+    runs-on: ubuntu-latest
+    steps:
+      - name: ffmpeg
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: trailer-part-*
+          path: parts
+          merge-multiple: true
+
+      - name: Stitch video + audio
+        run: |
+          set -euo pipefail
+          cd parts
+          ls -la
+          test -f audio.pcm || { echo "::error::audio.pcm is missing (shard 0 failed?)"; exit 1; }
+          FPS=$(jq -r .fps meta-0.json); FR=$(jq -r .frames meta-0.json); CH=$(jq -r .chunk meta-0.json)
+          for f in meta-*.json; do
+            [ "$(jq -r .frames "$f")" = "$FR" ] || { echo "::error::$f disagrees about the frame count"; exit 1; }
+          done
+          EXP=$(( (FR + CH - 1) / CH ))
+          GOT=$(ls seg_*.mp4 | wc -l)
+          [ "$GOT" -eq "$EXP" ] || { echo "::error::expected $EXP video segments, found $GOT"; exit 1; }
+          ls seg_*.mp4 | sort | sed "s/^/file '/;s/$/'/" > list.txt
+          ffmpeg -y -loglevel warning \
+            -f concat -safe 0 -i list.txt \
+            -f s16le -ar 48000 -ac 2 -i audio.pcm \
+            -map 0:v -map 1:a \
+            -c:v libx264 -preset slow -crf 15 -pix_fmt yuv420p \
+            -colorspace bt709 -color_primaries bt709 -color_trc bt709 -color_range tv \
+            -r "$FPS" -g $((FPS*2)) \
+            -c:a aac -b:a 320k -shortest -movflags +faststart \
+            ../RIFT-HORIZON-trailer.mp4
+          ls -la ../RIFT-HORIZON-trailer.mp4
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: RIFT-HORIZON-trailer
+          path: RIFT-HORIZON-trailer.mp4
+          retention-days: 14
