@@ -4,20 +4,29 @@ on:
   workflow_dispatch:
     inputs:
       width:
-        description: 'Video width in px'
+        description: 'Video width in px (1280 for quick checks)'
         default: '1920'
       height:
-        description: 'Video height in px'
+        description: 'Video height in px (720 for quick checks)'
         default: '1080'
       fps:
-        description: 'Frames per second (30 or 60)'
+        description: 'Frames per second (30 or 60). 60 takes twice as long.'
         default: '30'
       shards:
         description: 'Parallel render jobs (1-20)'
-        default: '12'
+        default: '20'
       audio_secs:
         description: 'Audio buffer length in seconds (must be longer than the trailer)'
         default: '130'
+      max_secs:
+        description: 'Only render the first N seconds (0 = the whole trailer). 36 covers the sky shots and the EVERY WEAPON card.'
+        default: '0'
+      require_post:
+        description: 'Stop early if the game had to switch its post effects off (true), or render a flat video anyway (false)'
+        default: 'true'
+      debug:
+        description: 'Log CSS animation state (true/false)'
+        default: 'false'
 
 permissions:
   contents: read
@@ -33,7 +42,7 @@ jobs:
         env:
           N: ${{ inputs.shards }}
         run: |
-          if ! [[ "$N" =~ ^[0-9]+$ ]]; then N=12; fi
+          if ! [[ "$N" =~ ^[0-9]+$ ]]; then N=20; fi
           if [ "$N" -lt 1 ]; then N=1; fi
           if [ "$N" -gt 20 ]; then N=20; fi
           echo "count=$N" >> "$GITHUB_OUTPUT"
@@ -66,6 +75,12 @@ jobs:
           THREE_VERSION="${VER:-0.170.0}" bash scripts/vendor-three.sh
           bash scripts/use-local-three.sh
 
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('scripts/render/package.json') }}
+
       - name: Install Playwright
         working-directory: scripts/render
         run: |
@@ -80,6 +95,9 @@ jobs:
           RT_SHARD: ${{ matrix.shard }}
           RT_SHARDS: ${{ needs.plan.outputs.count }}
           RT_AUDIO_SECS: ${{ inputs.audio_secs }}
+          RT_MAX_SECS: ${{ inputs.max_secs }}
+          RT_REQUIRE_POST: ${{ inputs.require_post }}
+          RT_DEBUG: ${{ inputs.debug }}
         run: node scripts/render/render-trailer.mjs
 
       - uses: actions/upload-artifact@v4
@@ -101,7 +119,7 @@ jobs:
           path: parts
           merge-multiple: true
 
-      - name: Stitch video + audio
+      - name: Stitch video + audio (video is stream-copied, not re-encoded)
         run: |
           set -euo pipefail
           cd parts
@@ -119,12 +137,11 @@ jobs:
             -f concat -safe 0 -i list.txt \
             -f s16le -ar 48000 -ac 2 -i audio.pcm \
             -map 0:v -map 1:a \
-            -c:v libx264 -preset slow -crf 15 -pix_fmt yuv420p \
-            -colorspace bt709 -color_primaries bt709 -color_trc bt709 -color_range tv \
-            -r "$FPS" -g $((FPS*2)) \
+            -c:v copy \
             -c:a aac -b:a 320k -shortest -movflags +faststart \
             ../RIFT-HORIZON-trailer.mp4
           ls -la ../RIFT-HORIZON-trailer.mp4
+          ffprobe -v error -show_entries format=duration:stream=codec_name,width,height,r_frame_rate -of default=nw=1 ../RIFT-HORIZON-trailer.mp4
 
       - uses: actions/upload-artifact@v4
         with:
