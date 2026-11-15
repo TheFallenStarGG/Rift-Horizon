@@ -4,11 +4,12 @@
  *  - virtual clock (performance.now) and a hand-cranked requestAnimationFrame
  *  - seeded Math.random, so every parallel job simulates the exact same trailer
  *  - the game's AudioContext becomes an OfflineAudioContext that is stepped in lockstep with the video
- *  - CSS keyframe animations are driven by the virtual clock; the trailer overlay's CSS transitions are switched off
- *    (they are what left card text stuck on screen), so overlay text now leaves exactly when the game says so
+ *  - CSS keyframe animations are driven by the virtual clock. An animation the game has stopped (class removed) is
+ *    cancelled for real: a script-paused CSS animation otherwise survives its class and keeps holding opacity:1,
+ *    which left card text on screen until the next card replaced it
+ *  - the trailer overlay's CSS transitions are switched off
  *  - a switch that skips GPU draw calls on frames this job does not capture. Draws into CUBE-MAP framebuffers are never
- *    skipped: three.js bakes scene.background (the equirect sky) into a cube map ONCE and caches it forever, so a bake
- *    that happened on a skipped frame left the sky black for the whole run
+ *    skipped: three.js bakes scene.background (the equirect sky) into a cube map ONCE and caches it forever
  *  - WebSocket is disabled so the render never connects to the multiplayer worker
  */
 (() => {
@@ -44,6 +45,22 @@
     const mo = new MutationObserver(() => { if (mountStyle()) mo.disconnect(); });
     mo.observe(document, { childList: true, subtree: true });
   }
+
+  // ---------- card text: cancel its animations whenever the game swaps its class ----------
+  // The game does `card.className = 'trcard'` (hide) and later `card.className = 'trcard on s'` (show, replays trSlam).
+  // Cancelling first guarantees the hide is instant and the next show starts a fresh animation.
+  try {
+    const d = Object.getOwnPropertyDescriptor(Element.prototype, 'className');
+    if (d && d.set) {
+      Object.defineProperty(Element.prototype, 'className', {
+        configurable: true, enumerable: d.enumerable, get: d.get,
+        set(v) {
+          try { if (this.classList && this.classList.contains('trcard')) for (const a of this.getAnimations()) a.cancel(); } catch (_) {}
+          d.set.call(this, v);
+        },
+      });
+    }
+  } catch (_) {}
 
   // ---------- skip GPU work on frames this job does not capture ----------
   const NOOP = ['drawArrays', 'drawElements', 'drawArraysInstanced', 'drawElementsInstanced', 'drawRangeElements',
@@ -101,6 +118,16 @@
     let list;
     try { list = document.getAnimations(); } catch (_) { return; }
     for (const a of list) {
+      try {
+        // a CSS animation whose name is no longer in its element's animation-name was stopped by the game: cancel it for real
+        if (typeof CSSAnimation !== 'undefined' && a instanceof CSSAnimation) {
+          const el = a.effect && a.effect.target;
+          if (el && el.isConnected) {
+            const names = getComputedStyle(el, a.effect.pseudoElement || null).animationName.split(',').map((s) => s.trim());
+            if (!names.includes(a.animationName)) { a.cancel(); continue; }
+          }
+        }
+      } catch (_) {}
       let t0 = born.get(a);
       if (t0 === undefined) { t0 = S.vt; born.set(a, t0); }
       try { if (a.playState === 'running') a.pause(); a.currentTime = S.vt - t0; } catch (_) {}
