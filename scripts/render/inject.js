@@ -4,8 +4,11 @@
  *  - virtual clock (performance.now) and a hand-cranked requestAnimationFrame
  *  - seeded Math.random, so every parallel job simulates the exact same trailer
  *  - the game's AudioContext becomes an OfflineAudioContext that is stepped in lockstep with the video
- *  - CSS animations/transitions (title cards, fades) are driven by the virtual clock
- *  - a switch that skips all GPU draw calls on frames this job does not capture
+ *  - CSS keyframe animations are driven by the virtual clock; the trailer overlay's CSS transitions are switched off
+ *    (they are what left card text stuck on screen), so overlay text now leaves exactly when the game says so
+ *  - a switch that skips GPU draw calls on frames this job does not capture. Draws into CUBE-MAP framebuffers are never
+ *    skipped: three.js bakes scene.background (the equirect sky) into a cube map ONCE and caches it forever, so a bake
+ *    that happened on a skipped frame left the sky black for the whole run
  *  - WebSocket is disabled so the render never connects to the multiplayer worker
  */
 (() => {
@@ -33,15 +36,32 @@
   // ---------- no network ----------
   window.WebSocket = function () { throw new Error('network is off while rendering'); };
 
+  // ---------- trailer overlay: no CSS transitions (only the trailer's own elements, so game boot is untouched) ----------
+  const noTrans = document.createElement('style');
+  noTrans.textContent = '#trailerUI,#trailerUI *,#trailerGrade{transition:none!important}';
+  const mountStyle = () => { if (document.head) { document.head.appendChild(noTrans); return true; } return false; };
+  if (!mountStyle()) {
+    const mo = new MutationObserver(() => { if (mountStyle()) mo.disconnect(); });
+    mo.observe(document, { childList: true, subtree: true });
+  }
+
   // ---------- skip GPU work on frames this job does not capture ----------
   const NOOP = ['drawArrays', 'drawElements', 'drawArraysInstanced', 'drawElementsInstanced', 'drawRangeElements',
     'clear', 'clearBufferfv', 'clearBufferiv', 'clearBufferuiv', 'clearBufferfi', 'blitFramebuffer'];
+  const FB = 0x8D40, DRAW_FB = 0x8CA9, CUBE_LO = 0x8515, CUBE_HI = 0x851A; // FRAMEBUFFER, DRAW_FRAMEBUFFER, TEXTURE_CUBE_MAP_POSITIVE_X .. NEGATIVE_Z
+  const cubeFB = new WeakSet(); // framebuffers that have a cube-map face attached: one-off bakes (the sky) render into these
   for (const C of [window.WebGLRenderingContext, window.WebGL2RenderingContext]) {
     if (!C) continue;
+    const P = C.prototype, bindFB = P.bindFramebuffer, fbTex = P.framebufferTexture2D;
+    P.bindFramebuffer = function (t, fb) { if (t === FB || t === DRAW_FB) this.__rtFB = fb; return bindFB.call(this, t, fb); };
+    P.framebufferTexture2D = function (t, a, tt, tex, l) {
+      if ((t === FB || t === DRAW_FB) && this.__rtFB && tt >= CUBE_LO && tt <= CUBE_HI) cubeFB.add(this.__rtFB);
+      return fbTex.call(this, t, a, tt, tex, l);
+    };
     for (const f of NOOP) {
-      const orig = C.prototype[f];
+      const orig = P[f];
       if (typeof orig !== 'function') continue;
-      C.prototype[f] = function (...a) { return S.skipGL ? undefined : orig.apply(this, a); };
+      P[f] = function (...a) { return S.skipGL && !(this.__rtFB && cubeFB.has(this.__rtFB)) ? undefined : orig.apply(this, a); };
     }
   }
 
@@ -75,7 +95,7 @@
     if (!S.tm && document.body && document.body.classList.contains('trailer-mode')) { S.tm = true; seed = 0x5eed1234; }
   }).observe(document, { subtree: true, attributes: true, attributeFilter: ['class'] });
 
-  // ---------- CSS animations / transitions follow the virtual clock ----------
+  // ---------- CSS animations follow the virtual clock ----------
   const born = new WeakMap();
   function syncAnims() {
     let list;
@@ -99,6 +119,12 @@
     begin() { seed = 0x00c0ffee; },
     /** text of the trailer's own warning chip (missing radio lines etc.), '' when none */
     chip() { const e = document.querySelector('#trailerUI .trsnd'); return e && e.style.display !== 'none' ? e.textContent : ''; },
+    /** debug: what CSS animations exist right now (RT_DEBUG=1) */
+    anims() {
+      try {
+        return document.getAnimations().slice(0, 12).map((a) => `${a.constructor.name}:${a.animationName || a.transitionProperty || '?'}:${a.playState}:${Math.round(a.currentTime || 0)}`).join(' | ') || '(none)';
+      } catch (e) { return 'n/a'; }
+    },
     /**
      * Run exactly one frame. skip = no GPU work. k = trailer frame index (>= 0 once it runs, -1 while booting).
      * Returns true while the trailer is still playing.
