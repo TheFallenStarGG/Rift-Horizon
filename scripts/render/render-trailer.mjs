@@ -171,9 +171,16 @@ async function main() {
   }
   if (postFailed) console.log('::warning::The game switched its post effects (bloom / AO / god rays / grade) off because this software renderer could not run them. The video will look flatter than on your phone.');
 
-  await browser.close();
-  srv.close();
+  // Tear down hard: Playwright / the static server often leave handles open and Node never exits,
+  // so the GitHub Actions step sits on "done" forever and merge never starts.
+  try { await context.close(); } catch (_) {}
+  try { await browser.close(); } catch (_) {}
+  await new Promise((resolve) => {
+    try { srv.close(() => resolve()); } catch (_) { resolve(); }
+    setTimeout(resolve, 3000);
+  });
   log('done');
+  process.exit(0);
 }
 
 main().catch((e) => { console.error('RENDER FAILED:', e); process.exit(1); });
