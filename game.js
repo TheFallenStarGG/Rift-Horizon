@@ -19,6 +19,7 @@ import { clampArenaCfg, assignRoles } from './lib/botTeams.js';
 import { updateHumanoidAnim, triggerShootKick, triggerMelee, ensureWeapon, LOD } from './lib/anim.js';
 import { createBuild } from './lib/build.js';
 import { createLobby, LOBBY_SPAWN } from './lib/lobby.js';
+import { createLeaderboards } from './lib/leaderboard.js';
 import { createMatch, MODES } from './lib/modes.js';
 import { loadout, setSlot, loadoutString } from './lib/loadout.js';
 import { ALL, SLOTS, bySlot, reloadDuration } from './lib/arsenal.js';
@@ -460,6 +461,10 @@ const lobby = createLobby(scene, tex, {
   getInput: () => input,
   getFov: () => settings.fov,
 });
+
+// ---------- global leaderboards (west wall of the lobby) ----------
+let boards = { update() {} };
+try { boards = createLeaderboards({ scene }); } catch (err) { console.error('[leaderboards]', err); }
 
 // ---------- bots ----------
 const enemyCtx = {
@@ -1073,6 +1078,7 @@ function frame(nowMs) {
         vehicles.update(dt, aircraft.isPiloting() ? noVehPrompt : player, {}, null);
       }
       aircraft.update(dt, player, {}, camera);
+      boards.update(dt, where === 'lobby');
       if (where === 'lobby') {
         const act = lobby.update(dt, player, vehicles.isDriving() || aircraft.isPiloting() ? false : interact);
         hud.setPrompt(joining ? { text: 'Searching for a match…', sub: 'Hang tight', progress: 0 } : lobby.prompt);
