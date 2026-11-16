@@ -178,6 +178,7 @@ const allEnemies = []; // full pool
 const remotes = new Map();
 let ctrl = null;
 let boss = null; // BOSS: lib/boss.js (loaded after the controller exists)
+let bossPortal = null; // BOSS: lobby portal (lib/boss.js)
 
 // ---------- multiplayer remotes ----------
 function makeTag(name, color) {
@@ -607,9 +608,11 @@ try {
     scene, camera, renderer, world, audio, hud, player, ctrl, viewmodel, playerMesh, isTouch,
     onExit: (why) => enterLobby(why),
   });
+  bossPortal = mod.createBossPortal(scene);
 } catch (err) {
   console.error('[boss] could not start — boss mode is disabled', err);
   boss = null;
+  bossPortal = null;
 }
 
 bindDev({
@@ -1063,13 +1066,7 @@ btnBoss.addEventListener('click', () => { closePanel(); startBoss(); });
   bb.append(btnBoss);
   pc.insertBefore(bb, pc.querySelector('.keys'));
 }
-const bossFab = document.createElement('button');
-bossFab.type = 'button';
-bossFab.textContent = '☠ BOSS FIGHT';
-bossFab.style.cssText = 'position:fixed;right:12px;top:64px;z-index:20;display:none;padding:.55rem .8rem;font:800 12px system-ui;letter-spacing:.12em;color:#fff;background:rgba(120,70,255,.85);border:1px solid rgba(255,255,255,.45);border-radius:6px';
-bossFab.addEventListener('click', () => startBoss());
-document.body.appendChild(bossFab);
-let bossFabShown = false;
+
 addEventListener('keydown', (e) => {
   if (e.code !== 'F9' || !running || chatFocused() || where !== 'lobby' || panelOpen || loadoutOpen) return;
   e.preventDefault();
@@ -1124,11 +1121,7 @@ function frame(nowMs) {
   }
   gfx.tick(raw);
 
-  // BOSS: floating button only on touch devices, only in the lobby
-  {
-    const show = isTouch && !!boss && running && where === 'lobby' && !panelOpen && !loadoutOpen && !joining;
-    if (show !== bossFabShown) { bossFabShown = show; bossFab.style.display = show ? '' : 'none'; }
-  }
+  if (bossPortal) bossPortal.setVisible(where === 'lobby'); // BOSS: the gate only exists in the lobby
 
   if (running) {
     const paused = panelOpen && !live && where !== 'multi';
@@ -1161,8 +1154,15 @@ function frame(nowMs) {
       aircraft.update(dt, player, {}, camera);
       boards.update(dt, where === 'lobby');
       if (where === 'lobby') {
-        const act = lobby.update(dt, player, vehicles.isDriving() || aircraft.isPiloting() ? false : interact);
-        hud.setPrompt(joining ? { text: 'Searching for a match…', sub: 'Hang tight', progress: 0 } : lobby.prompt);
+        const free = !(vehicles.isDriving() || aircraft.isPiloting());
+        const act = lobby.update(dt, player, free ? interact : false);
+        let pr = lobby.prompt;
+        if (bossPortal) { // BOSS
+          const enter = bossPortal.update(dt, player, free && !joining && !lobby.cutsceneOn(), interact);
+          if (enter) startBoss();
+          else if (!pr && bossPortal.prompt) pr = bossPortal.prompt;
+        }
+        hud.setPrompt(joining ? { text: 'Searching for a match…', sub: 'Hang tight', progress: 0 } : pr);
         if (act && act.type === 'portal' && !joining) enterPortal(act.mode);
         updateRemotes(dt);
       } else {
