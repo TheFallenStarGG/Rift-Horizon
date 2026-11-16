@@ -68,7 +68,7 @@ nameInput.value = store.get('rr.name', '');
 try { checkCallsign(nameInput.value); } catch (_) {}
 roomInput.value = store.get('rr.room', '');
 
-let where = 'lobby'; // 'lobby' | 'bots' | 'multi'
+let where = 'lobby'; // 'lobby' | 'bots' | 'multi' | 'dev' | 'boss'
 let running = false, panelOpen = false, loadoutOpen = false, joining = false;
 let forceOffline = false;
 let updater = null;
@@ -177,6 +177,7 @@ const enemies = []; // active bots
 const allEnemies = []; // full pool
 const remotes = new Map();
 let ctrl = null;
+let boss = null; // BOSS: lib/boss.js (loaded after the controller exists)
 
 // ---------- multiplayer remotes ----------
 function makeTag(name, color) {
@@ -289,6 +290,7 @@ const net = createNet({
       // bot arena already set where; keep local leaders
       return;
     }
+    if (boss) boss.stop(); // BOSS
     where = 'multi';
     joining = false;
     if (dropship) dropship.cancel();
@@ -583,11 +585,11 @@ const summon = createSummon({
 
 ctrl = createPlayerController({
   scene, camera, playerMesh, viewmodel, player, input, bullets, hud, audio, build, world, net, drone, lottery, summon,
-  getEnemies: () => (where === 'bots' ? enemies : []),
+  getEnemies: () => (where === 'bots' ? enemies : where === 'boss' && boss ? boss.targets : []), // BOSS
   getRemotes: () => remotes,
   isMulti,
   isBots: () => where === 'bots',
-  isFrozen: () => isMulti() && match.frozen,
+  isFrozen: () => (isMulti() && match.frozen) || (where === 'boss' && !!boss && boss.frozen), // BOSS: cinematics + end screen
   isTouch,
   isFriend: (c) => !!(c.remote && match.cfg.teams && c.team && c.team === match.team),
 });
@@ -596,6 +598,19 @@ hud.onBuildPick = (i) => ctrl.digit(i);
 hud.onTier = onBuildTier;
 
 dropship = createDropship({ scene, camera, playerMesh, viewmodel, player, input, audio, hud, world, tex, bullets, isTouch });
+
+// ---------- boss mode (lib/boss.js) ----------
+// BOSS: loaded defensively like the aircraft: if the module fails, the rest of the game still boots.
+try {
+  const mod = await import('./lib/boss.js');
+  boss = mod.createBoss({
+    scene, camera, renderer, world, audio, hud, player, ctrl, viewmodel, playerMesh, isTouch,
+    onExit: (why) => enterLobby(why),
+  });
+} catch (err) {
+  console.error('[boss] could not start — boss mode is disabled', err);
+  boss = null;
+}
 
 bindDev({
   hud,
@@ -718,6 +733,7 @@ function joinGlobalLobby() {
 }
 
 function enterLobby(msg) {
+  if (boss) boss.stop(); // BOSS
   if (dropship) dropship.cancel();
   hideBar();
   setFly(false);
@@ -751,6 +767,7 @@ function startDev() {
     hud.setMsg('Developer mode locked', 2000);
     return;
   }
+  if (boss) boss.stop(); // BOSS
   if (dropship) dropship.cancel();
   where = 'dev';
   vehicles.resetAll(player);
@@ -772,6 +789,7 @@ function startDev() {
 }
 
 async function startBots() {
+  if (boss) boss.stop(); // BOSS
   if (dropship) dropship.cancel();
   where = 'bots';
   vehicles.resetAll(player);
@@ -807,6 +825,35 @@ async function startBots() {
     hud.setMsg('Server followers unavailable — local followers fallback', 3500);
     for (const e of enemies) { e.serverSide = false; if (!e.isLeader) respawnEnemy(e); }
   }
+}
+
+/** BOSS: solo boss fight in a floating arena above The Pit (lib/boss.js) */
+function startBoss() {
+  if (!boss) { hud.setMsg('Boss mode is unavailable (see console)', 2500); return; }
+  if (where === 'boss') return;
+  if (dropship) dropship.cancel();
+  hideBar();
+  setFly(false);
+  where = 'boss';
+  joining = false;
+  net.disconnect();
+  clearRemotes();
+  vehicles.resetAll(player);
+  aircraft.resetAll(player);
+  for (const e of allEnemies) e.mesh.visible = false;
+  build.clear();
+  build.setActive(false);
+  lobby.setActive(false);
+  match.begin('bots');
+  player.canBuild = false;
+  player.kills = player.deaths = 0;
+  hud.setScore(0, 0);
+  hud.setMode('boss');
+  hud.setBanner(null);
+  hud.setStatus('');
+  playerListEl.textContent = '';
+  boss.start();
+  lockPointer();
 }
 
 async function startOnline(modeId) {
@@ -849,6 +896,7 @@ function openPanel() {
   btnResume.textContent = running ? 'Resume' : 'Back';
   btnLobby.style.display = running && where !== 'lobby' ? '' : 'none';
   btnLoadout.style.display = where === 'lobby' ? '' : 'none';
+  btnBoss.style.display = running && where === 'lobby' && boss ? '' : 'none'; // BOSS
   if (document.pointerLockElement) document.exitPointerLock();
 }
 function closePanel() {
@@ -926,7 +974,7 @@ btnLobby.addEventListener('click', () => { closePanel(); enterLobby('Back in the
 $('btnPause').addEventListener('click', () => { if (running) openPanel(); });
 document.addEventListener('pointerlockchange', () => {
   if (isTouch) return;
-  if (document.pointerLockElement !== canvas && running && !panelOpen && !loadoutOpen && !chatFocused() && !trailer.active) openPanel();
+  if (document.pointerLockElement !== canvas && running && !panelOpen && !loadoutOpen && !chatFocused() && !trailer.active && !(where === 'boss' && boss && boss.frozen)) openPanel(); // BOSS: end screen keeps the cursor free
 });
 
 // ---------- chat ----------
@@ -947,7 +995,7 @@ chatInput.addEventListener('keydown', (e) => {
 });
 addEventListener('keydown', (e) => {
   if (!running || panelOpen || loadoutOpen || chatFocused()) return;
-  if (canon(e.code) === 'KeyM' && running && where !== 'lobby') { radar.toggleFull(); return; }
+  if (canon(e.code) === 'KeyM' && running && where !== 'lobby' && where !== 'boss') { radar.toggleFull(); return; }
   if (canon(e.code) === 'KeyT' || e.code === 'Enter') {
     e.preventDefault();
     input.clear();
@@ -1001,6 +1049,33 @@ bindRange('setMinimapSize', 'minimapSize', (v) => Math.round(v) + 'px');
   pc.insertBefore(gb, pc.querySelector('.keys'));
 }
 
+// BOSS: entry points. Pause-menu button (lobby only), F9 shortcut, and a floating button on touch devices.
+const btnBoss = document.createElement('button');
+btnBoss.type = 'button';
+btnBoss.className = 'ghost';
+btnBoss.textContent = 'Fight the RIFTWARDEN';
+btnBoss.style.display = 'none';
+btnBoss.addEventListener('click', () => { closePanel(); startBoss(); });
+{
+  const pc = panel.querySelector('.card');
+  const bb = document.createElement('div');
+  bb.className = 'btns';
+  bb.append(btnBoss);
+  pc.insertBefore(bb, pc.querySelector('.keys'));
+}
+const bossFab = document.createElement('button');
+bossFab.type = 'button';
+bossFab.textContent = '☠ BOSS FIGHT';
+bossFab.style.cssText = 'position:fixed;right:12px;top:64px;z-index:20;display:none;padding:.55rem .8rem;font:800 12px system-ui;letter-spacing:.12em;color:#fff;background:rgba(120,70,255,.85);border:1px solid rgba(255,255,255,.45);border-radius:6px';
+bossFab.addEventListener('click', () => startBoss());
+document.body.appendChild(bossFab);
+let bossFabShown = false;
+addEventListener('keydown', (e) => {
+  if (e.code !== 'F9' || !running || chatFocused() || where !== 'lobby' || panelOpen || loadoutOpen) return;
+  e.preventDefault();
+  startBoss();
+});
+
 // ---------- loop ----------
 function introCam(t) {
   const a = t * 0.06;
@@ -1049,6 +1124,12 @@ function frame(nowMs) {
   }
   gfx.tick(raw);
 
+  // BOSS: floating button only on touch devices, only in the lobby
+  {
+    const show = isTouch && !!boss && running && where === 'lobby' && !panelOpen && !loadoutOpen && !joining;
+    if (show !== bossFabShown) { bossFabShown = show; bossFab.style.display = show ? '' : 'none'; }
+  }
+
   if (running) {
     const paused = panelOpen && !live && where !== 'multi';
     if (!paused) {
@@ -1088,6 +1169,8 @@ function frame(nowMs) {
         hud.setPrompt(null);
         if (where === 'bots') {
           for (const e of enemies) updateEnemy(dt, now, e);
+        } else if (where === 'boss') {
+          // BOSS: lib/boss.js drives this mode (updated right after world.update below)
         } else {
           updateRemotes(dt);
           match.tick(dt);
@@ -1099,8 +1182,14 @@ function frame(nowMs) {
       }
       bullets.update(dt);
       world.update(player.x, player.z, dt);
+      if (where === 'boss' && boss) { // BOSS: must run after world.update (it re-aims the sun's shadow box at the arena)
+        try { boss.update(dt); } catch (err) {
+          console.error('[boss]', err);
+          enterLobby('Boss mode hit an error — back in the lobby');
+        }
+      }
       radar.update(player, remotes, dt, {
-        active: running && where !== 'lobby',
+        active: running && where !== 'lobby' && where !== 'boss', // BOSS: no minimap in the sky arena
         enemies: where === 'bots' ? enemies : null,
         build,
       });
