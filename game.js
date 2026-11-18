@@ -180,6 +180,16 @@ let ctrl = null;
 let boss = null; // BOSS: lib/boss.js (loaded after the controller exists)
 let bossPortal = null; // BOSS: lobby portal (lib/boss.js)
 
+// BOSS2: second boss (lib/boss2.js), unlocked by beating the Riftwarden. Progress is saved per device in localStorage.
+let orrery = null, orreryPortal = null;
+let activeBoss = 'rw'; // 'rw' = Riftwarden, 'or' = Orrery
+const curBoss = () => (where === 'boss' ? (activeBoss === 'or' ? orrery : boss) : null);
+const stopBosses = () => { if (boss) boss.stop(); if (orrery) orrery.stop(); };
+const bossWins = (() => { try { return JSON.parse(store.get('rr.bossWins', '{}')) || {}; } catch (_) { return {}; } })();
+const saveWins = () => store.set('rr.bossWins', JSON.stringify(bossWins));
+const orreryUnlocked = () => !!bossWins.rw || devUnlocked(); // dev mode can always test it; delete `|| devUnlocked()` to make it strict
+let winPoll = 0;
+
 // ---------- multiplayer remotes ----------
 function makeTag(name, color) {
   const c = document.createElement('canvas');
@@ -291,7 +301,7 @@ const net = createNet({
       // bot arena already set where; keep local leaders
       return;
     }
-    if (boss) boss.stop(); // BOSS
+    stopBosses(); // BOSS + BOSS2
     where = 'multi';
     joining = false;
     if (dropship) dropship.cancel();
@@ -586,11 +596,11 @@ const summon = createSummon({
 
 ctrl = createPlayerController({
   scene, camera, playerMesh, viewmodel, player, input, bullets, hud, audio, build, world, net, drone, lottery, summon,
-  getEnemies: () => (where === 'bots' ? enemies : where === 'boss' && boss ? boss.targets : []), // BOSS
+  getEnemies: () => (where === 'bots' ? enemies : where === 'boss' && curBoss() ? curBoss().targets : []), // BOSS + BOSS2
   getRemotes: () => remotes,
   isMulti,
   isBots: () => where === 'bots',
-  isFrozen: () => (isMulti() && match.frozen) || (where === 'boss' && !!boss && boss.frozen), // BOSS: cinematics + end screen
+  isFrozen: () => (isMulti() && match.frozen) || (where === 'boss' && !!curBoss() && curBoss().frozen), // BOSS: cinematics + end screen
   isTouch,
   isFriend: (c) => !!(c.remote && match.cfg.teams && c.team && c.team === match.team),
 });
@@ -613,6 +623,21 @@ try {
   console.error('[boss] could not start — boss mode is disabled', err);
   boss = null;
   bossPortal = null;
+}
+
+// BOSS2: THE ORRERY (lib/boss2.js) — same defensive loading
+try {
+  const mod2 = await import('./lib/boss2.js');
+  orrery = mod2.createOrrery({
+    scene, camera, renderer, world, audio, hud, player, ctrl, viewmodel, playerMesh, isTouch,
+    onExit: (why) => enterLobby(why),
+    onWin: () => { bossWins.or = 1; saveWins(); },
+  });
+  orreryPortal = mod2.createOrreryPortal(scene, orreryUnlocked);
+} catch (err) {
+  console.error('[boss2] could not start — The Orrery is disabled', err);
+  orrery = null;
+  orreryPortal = null;
 }
 
 bindDev({
@@ -736,7 +761,7 @@ function joinGlobalLobby() {
 }
 
 function enterLobby(msg) {
-  if (boss) boss.stop(); // BOSS
+  stopBosses(); // BOSS + BOSS2
   if (dropship) dropship.cancel();
   hideBar();
   setFly(false);
@@ -770,7 +795,7 @@ function startDev() {
     hud.setMsg('Developer mode locked', 2000);
     return;
   }
-  if (boss) boss.stop(); // BOSS
+  stopBosses(); // BOSS + BOSS2
   if (dropship) dropship.cancel();
   where = 'dev';
   vehicles.resetAll(player);
@@ -792,7 +817,7 @@ function startDev() {
 }
 
 async function startBots() {
-  if (boss) boss.stop(); // BOSS
+  stopBosses(); // BOSS + BOSS2
   if (dropship) dropship.cancel();
   where = 'bots';
   vehicles.resetAll(player);
@@ -830,13 +855,16 @@ async function startBots() {
   }
 }
 
-/** BOSS: solo boss fight in a floating arena above The Pit (lib/boss.js) */
-function startBoss() {
-  if (!boss) { hud.setMsg('Boss mode is unavailable (see console)', 2500); return; }
+/** BOSS: solo boss fight in a floating arena. which = 'rw' (Riftwarden, lib/boss.js) or 'or' (Orrery, lib/boss2.js; needs the Riftwarden beaten) */
+function startBoss(which = 'rw') {
+  const b = which === 'or' ? orrery : boss;
+  if (!b) { hud.setMsg('Boss mode is unavailable (see console)', 2500); return; }
+  if (which === 'or' && !orreryUnlocked()) { hud.setMsg('Defeat the Riftwarden first', 2500); return; } // BOSS2
   if (where === 'boss') return;
   if (dropship) dropship.cancel();
   hideBar();
   setFly(false);
+  activeBoss = which; // BOSS2
   where = 'boss';
   joining = false;
   net.disconnect();
@@ -855,8 +883,21 @@ function startBoss() {
   hud.setBanner(null);
   hud.setStatus('');
   playerListEl.textContent = '';
-  boss.start();
+  b.start();
   lockPointer();
+}
+
+/** BOSS2: the Riftwarden has no win callback, so watch its end screen for the victory title. Cheap: 2 checks a second. */
+function pollBossWin(dt) {
+  if (where !== 'boss' || activeBoss !== 'rw' || bossWins.rw) return;
+  winPoll -= dt;
+  if (winPoll > 0) return;
+  winPoll = 0.5;
+  const el = document.querySelector('#rwUI .rw-end.on .rw-et');
+  if (el && /DEFEATED/i.test(el.textContent || '')) {
+    bossWins.rw = 1; saveWins();
+    hud.setMsg('A new gate has opened in the lobby…', 5000);
+  }
 }
 
 async function startOnline(modeId) {
@@ -900,6 +941,7 @@ function openPanel() {
   btnLobby.style.display = running && where !== 'lobby' ? '' : 'none';
   btnLoadout.style.display = where === 'lobby' ? '' : 'none';
   btnBoss.style.display = running && where === 'lobby' && boss ? '' : 'none'; // BOSS
+  btnOrrery.style.display = running && where === 'lobby' && orrery && orreryUnlocked() ? '' : 'none'; // BOSS2: only once unlocked
   if (document.pointerLockElement) document.exitPointerLock();
 }
 function closePanel() {
@@ -977,7 +1019,7 @@ btnLobby.addEventListener('click', () => { closePanel(); enterLobby('Back in the
 $('btnPause').addEventListener('click', () => { if (running) openPanel(); });
 document.addEventListener('pointerlockchange', () => {
   if (isTouch) return;
-  if (document.pointerLockElement !== canvas && running && !panelOpen && !loadoutOpen && !chatFocused() && !trailer.active && !(where === 'boss' && boss && boss.frozen)) openPanel(); // BOSS: end screen keeps the cursor free
+  if (document.pointerLockElement !== canvas && running && !panelOpen && !loadoutOpen && !chatFocused() && !trailer.active && !(where === 'boss' && curBoss() && curBoss().frozen)) openPanel(); // BOSS: end screen keeps the cursor free
 });
 
 // ---------- chat ----------
@@ -1058,7 +1100,7 @@ btnBoss.type = 'button';
 btnBoss.className = 'ghost';
 btnBoss.textContent = 'Fight the RIFTWARDEN';
 btnBoss.style.display = 'none';
-btnBoss.addEventListener('click', () => { closePanel(); startBoss(); });
+btnBoss.addEventListener('click', () => { closePanel(); startBoss('rw'); });
 {
   const pc = panel.querySelector('.card');
   const bb = document.createElement('div');
@@ -1067,10 +1109,27 @@ btnBoss.addEventListener('click', () => { closePanel(); startBoss(); });
   pc.insertBefore(bb, pc.querySelector('.keys'));
 }
 
+// BOSS2: pause-menu button for THE ORRERY (only shown once the Riftwarden has been beaten)
+const btnOrrery = document.createElement('button');
+btnOrrery.type = 'button';
+btnOrrery.className = 'ghost';
+btnOrrery.textContent = 'Fight THE ORRERY';
+btnOrrery.style.display = 'none';
+btnOrrery.addEventListener('click', () => { closePanel(); startBoss('or'); });
+{
+  const pc = panel.querySelector('.card');
+  const bb = document.createElement('div');
+  bb.className = 'btns';
+  bb.append(btnOrrery);
+  pc.insertBefore(bb, pc.querySelector('.keys'));
+}
+
 addEventListener('keydown', (e) => {
-  if (e.code !== 'F9' || !running || chatFocused() || where !== 'lobby' || panelOpen || loadoutOpen) return;
+  if ((e.code !== 'F9' && e.code !== 'F10') || !running || chatFocused() || where !== 'lobby' || panelOpen || loadoutOpen) return;
   e.preventDefault();
-  startBoss();
+  if (e.code === 'F9') startBoss('rw');
+  else if (orreryUnlocked()) startBoss('or'); // BOSS2: F10
+  else hud.setMsg('Defeat the Riftwarden first', 2000);
 });
 
 // ---------- loop ----------
@@ -1122,6 +1181,7 @@ function frame(nowMs) {
   gfx.tick(raw);
 
   if (bossPortal) bossPortal.setVisible(where === 'lobby'); // BOSS: the gate only exists in the lobby
+  if (orreryPortal) orreryPortal.setVisible(where === 'lobby'); // BOSS2
 
   if (running) {
     const paused = panelOpen && !live && where !== 'multi';
@@ -1159,8 +1219,13 @@ function frame(nowMs) {
         let pr = lobby.prompt;
         if (bossPortal) { // BOSS
           const enter = bossPortal.update(dt, player, free && !joining && !lobby.cutsceneOn(), interact);
-          if (enter) startBoss();
+          if (enter) startBoss('rw');
           else if (!pr && bossPortal.prompt) pr = bossPortal.prompt;
+        }
+        if (orreryPortal && where === 'lobby') { // BOSS2: sealed until the Riftwarden is beaten
+          const enter2 = orreryPortal.update(dt, player, free && !joining && !lobby.cutsceneOn(), interact);
+          if (enter2) startBoss('or');
+          else if (!pr && orreryPortal.prompt) pr = orreryPortal.prompt;
         }
         hud.setPrompt(joining ? { text: 'Searching for a match…', sub: 'Hang tight', progress: 0 } : pr);
         if (act && act.type === 'portal' && !joining) enterPortal(act.mode);
@@ -1170,7 +1235,7 @@ function frame(nowMs) {
         if (where === 'bots') {
           for (const e of enemies) updateEnemy(dt, now, e);
         } else if (where === 'boss') {
-          // BOSS: lib/boss.js drives this mode (updated right after world.update below)
+          // BOSS: lib/boss.js / lib/boss2.js drive this mode (updated right after world.update below)
         } else {
           updateRemotes(dt);
           match.tick(dt);
@@ -1182,11 +1247,12 @@ function frame(nowMs) {
       }
       bullets.update(dt);
       world.update(player.x, player.z, dt);
-      if (where === 'boss' && boss) { // BOSS: must run after world.update (it re-aims the sun's shadow box at the arena)
-        try { boss.update(dt); } catch (err) {
+      if (where === 'boss' && curBoss()) { // BOSS: must run after world.update (it re-aims the sun's shadow box at the arena)
+        try { curBoss().update(dt); } catch (err) {
           console.error('[boss]', err);
           enterLobby('Boss mode hit an error — back in the lobby');
         }
+        pollBossWin(dt); // BOSS2
       }
       radar.update(player, remotes, dt, {
         active: running && where !== 'lobby' && where !== 'boss', // BOSS: no minimap in the sky arena
