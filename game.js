@@ -182,12 +182,15 @@ let bossPortal = null; // BOSS: lobby portal (lib/boss.js)
 
 // BOSS2: second boss (lib/boss2.js), unlocked by beating the Riftwarden. Progress is saved per device in localStorage.
 let orrery = null, orreryPortal = null;
-let activeBoss = 'rw'; // 'rw' = Riftwarden, 'or' = Orrery
-const curBoss = () => (where === 'boss' ? (activeBoss === 'or' ? orrery : boss) : null);
-const stopBosses = () => { if (boss) boss.stop(); if (orrery) orrery.stop(); };
+// BOSS3: third boss (lib/boss3.js) THE DEV, unlocked by beating the Orrery.
+let dev = null, devPortal = null;
+let activeBoss = 'rw'; // 'rw' = Riftwarden, 'or' = Orrery, 'dv' = The Dev
+const curBoss = () => (where === 'boss' ? (activeBoss === 'dv' ? dev : activeBoss === 'or' ? orrery : boss) : null);
+const stopBosses = () => { if (boss) boss.stop(); if (orrery) orrery.stop(); if (dev) dev.stop(); };
 const bossWins = (() => { try { return JSON.parse(store.get('rr.bossWins', '{}')) || {}; } catch (_) { return {}; } })();
 const saveWins = () => store.set('rr.bossWins', JSON.stringify(bossWins));
 const orreryUnlocked = () => !!bossWins.rw || devUnlocked(); // dev mode can always test it; delete `|| devUnlocked()` to make it strict
+const bossDevUnlocked = () => !!bossWins.or || devUnlocked(); // BOSS3: sealed until the Orrery is beaten (dev mode can always test it)
 let winPoll = 0;
 
 // ---------- multiplayer remotes ----------
@@ -301,7 +304,7 @@ const net = createNet({
       // bot arena already set where; keep local leaders
       return;
     }
-    stopBosses(); // BOSS + BOSS2
+    stopBosses(); // BOSS + BOSS2 + BOSS3
     where = 'multi';
     joining = false;
     if (dropship) dropship.cancel();
@@ -596,7 +599,7 @@ const summon = createSummon({
 
 ctrl = createPlayerController({
   scene, camera, playerMesh, viewmodel, player, input, bullets, hud, audio, build, world, net, drone, lottery, summon,
-  getEnemies: () => (where === 'bots' ? enemies : where === 'boss' && curBoss() ? curBoss().targets : []), // BOSS + BOSS2
+  getEnemies: () => (where === 'bots' ? enemies : where === 'boss' && curBoss() ? curBoss().targets : []), // BOSS + BOSS2 + BOSS3
   getRemotes: () => remotes,
   isMulti,
   isBots: () => where === 'bots',
@@ -638,6 +641,50 @@ try {
   console.error('[boss2] could not start — The Orrery is disabled', err);
   orrery = null;
   orreryPortal = null;
+}
+
+// BOSS3: weapon hooks for THE DEV's "git checkout" attack (swaps your primary + secondary for a while, then rolls them back)
+const bossWeapons = {
+  snapshot: () => ({ ...loadout }),
+  restore: (snap) => {
+    try {
+      if (!snap) return;
+      for (const s of SLOTS) if (snap[s]) setSlot(s, snap[s]);
+      ctrl.refreshLoadout(); refreshSlotsUI();
+      if (ctrl.equip) ctrl.equip('main');
+    } catch (_) {}
+  },
+  scramble: () => {
+    try {
+      const names = [];
+      for (const slot of ['main', 'side']) {
+        const pool = bySlot(slot).filter((d) => d.id !== loadout[slot]);
+        if (!pool.length) continue;
+        const d = pool[(Math.random() * pool.length) | 0];
+        setSlot(slot, d.id);
+        names.push(d.name);
+      }
+      ctrl.refreshLoadout(); refreshSlotsUI();
+      if (ctrl.equip) ctrl.equip('main');
+      return names[0] || null;
+    } catch (_) { return null; }
+  },
+};
+
+// BOSS3: THE DEV (lib/boss3.js) — same defensive loading
+try {
+  const mod3 = await import('./lib/boss3.js');
+  dev = mod3.createDev({
+    scene, camera, renderer, world, audio, hud, player, ctrl, viewmodel, playerMesh, isTouch,
+    weapons: bossWeapons,
+    onExit: (why) => enterLobby(why),
+    onWin: () => { bossWins.dv = 1; saveWins(); },
+  });
+  devPortal = mod3.createDevPortal(scene, bossDevUnlocked);
+} catch (err) {
+  console.error('[boss3] could not start — The Dev is disabled', err);
+  dev = null;
+  devPortal = null;
 }
 
 bindDev({
@@ -761,7 +808,7 @@ function joinGlobalLobby() {
 }
 
 function enterLobby(msg) {
-  stopBosses(); // BOSS + BOSS2
+  stopBosses(); // BOSS + BOSS2 + BOSS3
   if (dropship) dropship.cancel();
   hideBar();
   setFly(false);
@@ -795,7 +842,7 @@ function startDev() {
     hud.setMsg('Developer mode locked', 2000);
     return;
   }
-  stopBosses(); // BOSS + BOSS2
+  stopBosses(); // BOSS + BOSS2 + BOSS3
   if (dropship) dropship.cancel();
   where = 'dev';
   vehicles.resetAll(player);
@@ -817,7 +864,7 @@ function startDev() {
 }
 
 async function startBots() {
-  stopBosses(); // BOSS + BOSS2
+  stopBosses(); // BOSS + BOSS2 + BOSS3
   if (dropship) dropship.cancel();
   where = 'bots';
   vehicles.resetAll(player);
@@ -855,16 +902,17 @@ async function startBots() {
   }
 }
 
-/** BOSS: solo boss fight in a floating arena. which = 'rw' (Riftwarden, lib/boss.js) or 'or' (Orrery, lib/boss2.js; needs the Riftwarden beaten) */
+/** BOSS: solo boss fight in a floating arena. which = 'rw' (Riftwarden, lib/boss.js), 'or' (Orrery, lib/boss2.js; needs the Riftwarden beaten) or 'dv' (The Dev, lib/boss3.js; needs the Orrery beaten) */
 function startBoss(which = 'rw') {
-  const b = which === 'or' ? orrery : boss;
+  const b = which === 'dv' ? dev : which === 'or' ? orrery : boss;
   if (!b) { hud.setMsg('Boss mode is unavailable (see console)', 2500); return; }
   if (which === 'or' && !orreryUnlocked()) { hud.setMsg('Defeat the Riftwarden first', 2500); return; } // BOSS2
+  if (which === 'dv' && !bossDevUnlocked()) { hud.setMsg('Defeat THE ORRERY first', 2500); return; } // BOSS3
   if (where === 'boss') return;
   if (dropship) dropship.cancel();
   hideBar();
   setFly(false);
-  activeBoss = which; // BOSS2
+  activeBoss = which; // BOSS2 + BOSS3
   where = 'boss';
   joining = false;
   net.disconnect();
@@ -942,6 +990,7 @@ function openPanel() {
   btnLoadout.style.display = where === 'lobby' ? '' : 'none';
   btnBoss.style.display = running && where === 'lobby' && boss ? '' : 'none'; // BOSS
   btnOrrery.style.display = running && where === 'lobby' && orrery && orreryUnlocked() ? '' : 'none'; // BOSS2: only once unlocked
+  btnDev.style.display = running && where === 'lobby' && dev && bossDevUnlocked() ? '' : 'none'; // BOSS3: only once the Orrery is beaten
   if (document.pointerLockElement) document.exitPointerLock();
 }
 function closePanel() {
@@ -1124,12 +1173,30 @@ btnOrrery.addEventListener('click', () => { closePanel(); startBoss('or'); });
   pc.insertBefore(bb, pc.querySelector('.keys'));
 }
 
+// BOSS3: pause-menu button for THE DEV (only shown once the Orrery has been beaten)
+const btnDev = document.createElement('button');
+btnDev.type = 'button';
+btnDev.className = 'ghost';
+btnDev.textContent = 'Fight THE DEV';
+btnDev.style.display = 'none';
+btnDev.addEventListener('click', () => { closePanel(); startBoss('dv'); });
+{
+  const pc = panel.querySelector('.card');
+  const bb = document.createElement('div');
+  bb.className = 'btns';
+  bb.append(btnDev);
+  pc.insertBefore(bb, pc.querySelector('.keys'));
+}
+
 addEventListener('keydown', (e) => {
-  if ((e.code !== 'F9' && e.code !== 'F10') || !running || chatFocused() || where !== 'lobby' || panelOpen || loadoutOpen) return;
+  if ((e.code !== 'F9' && e.code !== 'F10' && e.code !== 'F4') || !running || chatFocused() || where !== 'lobby' || panelOpen || loadoutOpen) return;
   e.preventDefault();
   if (e.code === 'F9') startBoss('rw');
-  else if (orreryUnlocked()) startBoss('or'); // BOSS2: F10
-  else hud.setMsg('Defeat the Riftwarden first', 2000);
+  else if (e.code === 'F10') { // BOSS2: F10
+    if (orreryUnlocked()) startBoss('or'); else hud.setMsg('Defeat the Riftwarden first', 2000);
+  } else { // BOSS3: F4
+    if (bossDevUnlocked()) startBoss('dv'); else hud.setMsg('Defeat THE ORRERY first', 2000);
+  }
 });
 
 // ---------- loop ----------
@@ -1182,6 +1249,7 @@ function frame(nowMs) {
 
   if (bossPortal) bossPortal.setVisible(where === 'lobby'); // BOSS: the gate only exists in the lobby
   if (orreryPortal) orreryPortal.setVisible(where === 'lobby'); // BOSS2
+  if (devPortal) devPortal.setVisible(where === 'lobby'); // BOSS3
 
   if (running) {
     const paused = panelOpen && !live && where !== 'multi';
@@ -1227,6 +1295,11 @@ function frame(nowMs) {
           if (enter2) startBoss('or');
           else if (!pr && orreryPortal.prompt) pr = orreryPortal.prompt;
         }
+        if (devPortal && where === 'lobby') { // BOSS3: sealed until the Orrery is beaten
+          const enter3 = devPortal.update(dt, player, free && !joining && !lobby.cutsceneOn(), interact);
+          if (enter3) startBoss('dv');
+          else if (!pr && devPortal.prompt) pr = devPortal.prompt;
+        }
         hud.setPrompt(joining ? { text: 'Searching for a match…', sub: 'Hang tight', progress: 0 } : pr);
         if (act && act.type === 'portal' && !joining) enterPortal(act.mode);
         updateRemotes(dt);
@@ -1235,7 +1308,7 @@ function frame(nowMs) {
         if (where === 'bots') {
           for (const e of enemies) updateEnemy(dt, now, e);
         } else if (where === 'boss') {
-          // BOSS: lib/boss.js / lib/boss2.js drive this mode (updated right after world.update below)
+          // BOSS: lib/boss.js / lib/boss2.js / lib/boss3.js drive this mode (updated right after world.update below)
         } else {
           updateRemotes(dt);
           match.tick(dt);
