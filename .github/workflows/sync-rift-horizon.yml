@@ -26,7 +26,7 @@ on:
         required: false
         default: ''
       overwrite:
-        description: 'Overwrite destination (hard reset on pull / force push on push)'
+        description: 'Overwrite destination files (pull: hard reset + force push; push: Dev files replace the branch contents but Rift-Horizon history is kept, no force push)'
         type: boolean
         default: true
 
@@ -152,11 +152,18 @@ jobs:
 
           git fetch main "$MAIN" 2>/dev/null || true
 
-          if [ "$OVERWRITE" = "true" ]; then
-            git push main "HEAD:refs/heads/$MAIN" --force
-          else
-            git push main "HEAD:refs/heads/$MAIN"
+          # Overwrite WITHOUT rewriting history: record the Rift-Horizon branch tip as a
+          # parent via a merge commit that keeps Dev's files exactly (-s ours), so the
+          # push below is a normal fast-forward and no force push is ever needed.
+          if [ "$OVERWRITE" = "true" ] && git rev-parse --verify --quiet "refs/remotes/main/$MAIN" >/dev/null; then
+            if ! git merge-base --is-ancestor "main/$MAIN" HEAD; then
+              git merge -s ours --allow-unrelated-histories --no-edit \
+                -m "chore: sync Dev into $MAIN (Dev files win, Rift-Horizon history kept)" \
+                "main/$MAIN"
+            fi
           fi
-          echo "Pushed Dev/$DEV → Rift-Horizon/$MAIN (without sync workflow)"
+
+          git push main "HEAD:refs/heads/$MAIN"
+          echo "Pushed Dev/$DEV → Rift-Horizon/$MAIN (without sync workflow, history preserved)"
           echo "https://github.com/TheFallenStarGG/Rift-Horizon/tree/$MAIN"
-          git log -1 --oneline
+          git log -3 --oneline
