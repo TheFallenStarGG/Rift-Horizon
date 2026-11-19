@@ -1,4 +1,4 @@
-/** Realm Range: bootstrap. Renderer (world pass + viewmodel pass), lobby, bot arena, online modes, menus. */
+/** Rift Horizon: bootstrap. Renderer (world pass + viewmodel pass), lobby, bot arena, online modes, menus. */
 import * as THREE from 'three';
 import { settings, saveSettings } from './lib/settings.js';
 import { createTextures } from './lib/textures.js';
@@ -26,6 +26,7 @@ import { ALL, SLOTS, bySlot, reloadDuration } from './lib/arsenal.js';
 import { createNet, WORKER_URL } from './lib/net.js';
 import { initMenus } from './lib/menus.js';
 import { createRecorder } from './lib/recorder.js';
+import { isReservedName } from './lib/account.js';
 import { applyLayout } from './lib/layout.js';
 import { look, applyLook, decodeLook } from './lib/look.js';
 import { canon } from './lib/keybinds.js';
@@ -1060,6 +1061,11 @@ function closeLoadout() {
 btnStart.addEventListener('click', () => {
   audio.unlock();
   myName = (nameInput.value || 'Player').trim().slice(0, 20) || 'Player';
+  if (isReservedName(myName)) {
+    hud.setMsg('That name is reserved', 2500);
+    myName = 'Player';
+    nameInput.value = 'Player';
+  }
   store.set('rr.name', nameInput.value.trim());
   checkCallsign(myName);
   if (devUnlocked() && lobby.enableDevPortal) lobby.enableDevPortal();
