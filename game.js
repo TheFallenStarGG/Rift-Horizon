@@ -1004,9 +1004,6 @@ function openPanel() {
   btnResume.textContent = running ? 'Resume' : 'Back';
   btnLobby.style.display = running && where !== 'lobby' ? '' : 'none';
   btnLoadout.style.display = where === 'lobby' ? '' : 'none';
-  btnBoss.style.display = running && where === 'lobby' && boss ? '' : 'none'; // BOSS
-  btnOrrery.style.display = running && where === 'lobby' && orrery && orreryUnlocked() ? '' : 'none'; // BOSS2: only once unlocked
-  btnDev.style.display = running && where === 'lobby' && dev && bossDevUnlocked() ? '' : 'none'; // BOSS3: only once the Orrery is beaten
   if (document.pointerLockElement) document.exitPointerLock();
 }
 function closePanel() {
@@ -1159,61 +1156,6 @@ bindRange('setMinimapSize', 'minimapSize', (v) => Math.round(v) + 'px');
   pc.insertBefore(gb, pc.querySelector('.keys'));
 }
 
-// BOSS: entry points. Pause-menu button (lobby only), F9 shortcut, and a floating button on touch devices.
-const btnBoss = document.createElement('button');
-btnBoss.type = 'button';
-btnBoss.className = 'ghost';
-btnBoss.textContent = 'Fight the RIFTWARDEN';
-btnBoss.style.display = 'none';
-btnBoss.addEventListener('click', () => { closePanel(); startBoss('rw'); });
-{
-  const pc = panel.querySelector('.card');
-  const bb = document.createElement('div');
-  bb.className = 'btns';
-  bb.append(btnBoss);
-  pc.insertBefore(bb, pc.querySelector('.keys'));
-}
-
-// BOSS2: pause-menu button for THE ORRERY (only shown once the Riftwarden has been beaten)
-const btnOrrery = document.createElement('button');
-btnOrrery.type = 'button';
-btnOrrery.className = 'ghost';
-btnOrrery.textContent = 'Fight THE ORRERY';
-btnOrrery.style.display = 'none';
-btnOrrery.addEventListener('click', () => { closePanel(); startBoss('or'); });
-{
-  const pc = panel.querySelector('.card');
-  const bb = document.createElement('div');
-  bb.className = 'btns';
-  bb.append(btnOrrery);
-  pc.insertBefore(bb, pc.querySelector('.keys'));
-}
-
-// BOSS3: pause-menu button for THE DEV (only shown once the Orrery has been beaten)
-const btnDev = document.createElement('button');
-btnDev.type = 'button';
-btnDev.className = 'ghost';
-btnDev.textContent = 'Fight THE DEV';
-btnDev.style.display = 'none';
-btnDev.addEventListener('click', () => { closePanel(); startBoss('dv'); });
-{
-  const pc = panel.querySelector('.card');
-  const bb = document.createElement('div');
-  bb.className = 'btns';
-  bb.append(btnDev);
-  pc.insertBefore(bb, pc.querySelector('.keys'));
-}
-
-addEventListener('keydown', (e) => {
-  if ((e.code !== 'F9' && e.code !== 'F10' && e.code !== 'F4') || !running || chatFocused() || where !== 'lobby' || panelOpen || loadoutOpen) return;
-  e.preventDefault();
-  if (e.code === 'F9') startBoss('rw');
-  else if (e.code === 'F10') { // BOSS2: F10
-    if (orreryUnlocked()) startBoss('or'); else hud.setMsg('Defeat the Riftwarden first', 2000);
-  } else { // BOSS3: F4
-    if (bossDevUnlocked()) startBoss('dv'); else hud.setMsg('Defeat THE ORRERY first', 2000);
-  }
-});
 
 // ---------- loop ----------
 function introCam(t) {
