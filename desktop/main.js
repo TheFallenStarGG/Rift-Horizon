@@ -7,6 +7,7 @@
 const { app, BrowserWindow, shell, globalShortcut, ipcMain } = require('electron');
 const path = require('path');
 const fs = require('fs');
+const crypto = require('crypto');
 const https = require('https');
 const http = require('http');
 const { spawn, execFile } = require('child_process');
@@ -281,6 +282,29 @@ function platformInfo() {
 
 ipcMain.handle('rift:get-version', () => APP_VERSION);
 ipcMain.handle('rift:get-platform', () => platformInfo());
+
+/**
+ * Anti-cheat: sha256 of the game files this app is running (a file:// page can't fetch them itself).
+ * Only index.html, game.js and lib/* inside the game folder. CRLF is turned into LF first so a Windows build
+ * hashes the same as the manifest.
+ */
+ipcMain.handle('rift:hash-files', async (_event, paths) => {
+  const out = {};
+  const root = path.resolve(gameRoot);
+  for (const p of (Array.isArray(paths) ? paths : []).slice(0, 600)) {
+    if (typeof p !== 'string' || p.includes('..') || !/^(index\.html|game\.js|lib\/[\w./-]+\.(js|mjs|css))$/i.test(p)) continue;
+    const full = path.resolve(root, p);
+    if (!full.startsWith(root + path.sep)) continue;
+    try {
+      const raw = await fs.promises.readFile(full);
+      const lf = Buffer.from(raw.toString('latin1').replace(/\r\n/g, '\n'), 'latin1');
+      out[p] = crypto.createHash('sha256').update(lf).digest('hex');
+    } catch (_) {
+      out[p] = 'missing';
+    }
+  }
+  return out;
+});
 
 /**
  * opts: { url, version, kind }
