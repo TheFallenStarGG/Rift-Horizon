@@ -3,6 +3,7 @@ name: Update anti-cheat manifest
 on:
   push:
     branches: [Update-7]
+  workflow_dispatch: {}
 
 concurrency:
   group: anticheat-manifest
@@ -27,8 +28,34 @@ jobs:
         with:
           node-version: 20
 
-      - name: Generate manifest
-        run: node tools/make-manifest.mjs server/worker/src/manifest.js
+      - name: Web build
+        run: node tools/make-manifest.mjs server/worker/src/manifest.js --tag web
+
+      # Same staging as build-release.yml (Android: index.html rewritten for local Three.js, native bridge appended to game.js).
+      # If you change how build-release.yml stages files, change it here too.
+      - name: Android build (packaged files)
+        run: |
+          set -e
+          chmod +x scripts/use-local-three.sh
+          rm -rf _android && mkdir -p _android
+          for item in index.html game.js lib; do
+            [ -e "$item" ] && cp -a "$item" _android/
+          done
+          ./scripts/use-local-three.sh _android/index.html
+          if [ -f scripts/native-bridge-snippet.js ]; then
+            cat scripts/native-bridge-snippet.js >> _android/game.js
+          fi
+          node tools/make-manifest.mjs server/worker/src/manifest.js --tag android --dir _android --skip index.html
+
+      - name: Desktop build (packaged files)
+        run: |
+          set -e
+          rm -rf _desktop && mkdir -p _desktop
+          for item in index.html game.js lib; do
+            [ -e "$item" ] && cp -a "$item" _desktop/
+          done
+          ./scripts/use-local-three.sh _desktop/index.html
+          node tools/make-manifest.mjs server/worker/src/manifest.js --tag desktop --dir _desktop
 
       - name: Commit to server repo
         working-directory: server
