@@ -7,6 +7,8 @@ contextBridge.exposeInMainWorld('riftDesktop', {
   platform: 'electron',
   getVersion: () => ipcRenderer.invoke('rift:get-version'),
   getPlatform: () => ipcRenderer.invoke('rift:get-platform'),
+  // anti-cheat: sha256 of the packaged game files (the page can't fetch file:// itself)
+  hashFiles: (paths) => ipcRenderer.invoke('rift:hash-files', paths),
   downloadUpdate: (opts) => {
     // opts: { url, version, kind: 'portable'|'setup'|'appimage'|'deb'|'maczip', onProgress? }
     return new Promise((resolve, reject) => {
