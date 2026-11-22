@@ -1,4 +1,10 @@
 #!/usr/bin/env node
+/**
+ * tools/make-manifest.mjs - hashes the committed bytes (git HEAD) of every .js/.html/.css file in the game repo and adds
+ * the build to the worker's manifest. Run by .github/workflows/manifest.yml on every push:
+ *   node tools/make-manifest.mjs server/worker/src/manifest.js
+ * The newest 3 builds stay accepted so players on a cached older copy aren't locked out.
+ */
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { writeFileSync, existsSync } from 'node:fs';
@@ -10,10 +16,10 @@ const out = process.argv[2];
 if (!out) { console.error('usage: node tools/make-manifest.mjs <path to worker/src/manifest.js>'); process.exit(1); }
 const root = execFileSync('git', ['rev-parse', '--show-toplevel']).toString().trim();
 const git = (...a) => execFileSync('git', a, { cwd: root, maxBuffer: 1 << 28 });
-if (git('status', '--porcelain').toString().trim()) console.warn('WARNING: uncommitted changes. Only committed files are hashed; commit + deploy first or the hashes will not match.');
+if (git('status', '--porcelain', '--untracked-files=no').toString().trim()) console.warn('WARNING: uncommitted changes to tracked files. Only committed files are hashed.');
 
 const files = git('ls-files', '-z').toString().split('\0')
-  .filter((f) => f && /\.(js|mjs|html|css)$/i.test(f) && !/^(worker|tools|node_modules)\//.test(f)).sort();
+  .filter((f) => f && /\.(js|mjs|html|css)$/i.test(f) && !/^(worker|tools|server|node_modules)\//.test(f)).sort();
 const map = {};
 for (const f of files) map[f] = createHash('sha256').update(git('cat-file', 'blob', 'HEAD:' + f)).digest('hex');
 const id = createHash('sha256').update(Object.entries(map).map(([k, v]) => k + ':' + v).join('\n')).digest('hex').slice(0, 12);
