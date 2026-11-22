@@ -1,0 +1,44 @@
+name: Update anti-cheat manifest
+
+on:
+  push:
+    branches: [Update-7]
+
+concurrency:
+  group: anticheat-manifest
+  cancel-in-progress: false
+
+jobs:
+  manifest:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout game
+        uses: actions/checkout@v4
+
+      - name: Checkout server
+        uses: actions/checkout@v4
+        with:
+          repository: TheFallenStarGG/Rift-Horizon-Server
+          ref: main
+          path: server
+          token: ${{ secrets.SERVER_REPO_TOKEN }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Generate manifest
+        run: node tools/make-manifest.mjs server/worker/src/manifest.js
+
+      - name: Commit to server repo
+        working-directory: server
+        run: |
+          if git diff --quiet; then
+            echo "Manifest unchanged"
+            exit 0
+          fi
+          git config user.name "anticheat-bot"
+          git config user.email "anticheat-bot@users.noreply.github.com"
+          git add worker/src/manifest.js
+          git commit -m "Update anti-cheat manifest for ${GITHUB_SHA::7}"
+          git push
