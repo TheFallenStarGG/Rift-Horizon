@@ -1,33 +1,58 @@
 #!/usr/bin/env node
 /**
- * tools/make-manifest.mjs - hashes the committed bytes (git HEAD) of the files the browser actually loads
- * (index.html, game.js, lib/*) and adds the build to the worker's manifest. Run by .github/workflows/manifest.yml on every push:
- *   node tools/make-manifest.mjs server/worker/src/manifest.js
- * The newest 3 builds stay accepted so players on a cached older copy aren't locked out.
+ * tools/make-manifest.mjs - adds one build of the game's browser-loaded files (index.html, game.js, lib/*) to the worker's
+ * anti-cheat manifest. Run by .github/workflows/manifest.yml on every push:
+ *
+ *   node tools/make-manifest.mjs <manifest.js> [--tag web|desktop|android] [--dir <folder>] [--skip <file>]
+ *
+ *   --tag   which kind of client this build is. Each tag keeps its own newest 3 builds, so a web deploy never evicts the app builds.
+ *   --dir   hash the files in this folder (a staged app build) instead of the committed files (git HEAD).
+ *   --skip  leave a file out of this build's check (repeatable).
  */
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { writeFileSync, existsSync } from 'node:fs';
+import { writeFileSync, readFileSync, existsSync, readdirSync, statSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
-import { resolve } from 'node:path';
+import { resolve, join, relative, sep } from 'node:path';
 
 const KEEP = 3;
-const out = process.argv[2];
-if (!out) { console.error('usage: node tools/make-manifest.mjs <path to worker/src/manifest.js>'); process.exit(1); }
-const root = execFileSync('git', ['rev-parse', '--show-toplevel']).toString().trim();
-const git = (...a) => execFileSync('git', a, { cwd: root, maxBuffer: 1 << 28 });
-if (git('status', '--porcelain', '--untracked-files=no').toString().trim()) console.warn('WARNING: uncommitted changes to tracked files. Only committed files are hashed.');
+const WANT = /^(index\.html|game\.js|lib\/.+\.(js|mjs|css))$/i;
 
-const files = git('ls-files', '-z').toString().split('\0')
-  .filter((f) => /^(index\.html|game\.js|lib\/.+\.(js|mjs|css))$/i.test(f)).sort();
+const args = process.argv.slice(2);
+const out = args.find((a) => !a.startsWith('--') && args[args.indexOf(a) - 1] !== '--tag' && args[args.indexOf(a) - 1] !== '--dir' && args[args.indexOf(a) - 1] !== '--skip');
+const opt = (name) => { const i = args.indexOf(name); return i >= 0 ? args[i + 1] : ''; };
+const skip = new Set(args.flatMap((a, i) => (a === '--skip' ? [args[i + 1]] : [])));
+const tag = opt('--tag') || 'web';
+const dir = opt('--dir');
+if (!out || !/^(web|desktop|android)$/.test(tag)) {
+  console.error('usage: node tools/make-manifest.mjs <manifest.js> [--tag web|desktop|android] [--dir <folder>] [--skip <file>]');
+  process.exit(1);
+}
+
+const sha = (buf) => createHash('sha256').update(buf).digest('hex');
 const map = {};
-for (const f of files) map[f] = createHash('sha256').update(git('cat-file', 'blob', 'HEAD:' + f)).digest('hex');
-const id = createHash('sha256').update(Object.entries(map).map(([k, v]) => k + ':' + v).join('\n')).digest('hex').slice(0, 12);
+if (dir) {
+  const root = resolve(dir);
+  const walk = (d) => { for (const n of readdirSync(d)) { const p = join(d, n); statSync(p).isDirectory() ? walk(p) : (() => { const rel = relative(root, p).split(sep).join('/'); if (WANT.test(rel) && !skip.has(rel)) map[rel] = sha(readFileSync(p)); })(); } };
+  walk(root);
+} else {
+  const top = execFileSync('git', ['rev-parse', '--show-toplevel']).toString().trim();
+  const git = (...a) => execFileSync('git', a, { cwd: top, maxBuffer: 1 << 28 });
+  if (git('status', '--porcelain', '--untracked-files=no').toString().trim()) console.warn('WARNING: uncommitted changes to tracked files. Only committed files are hashed.');
+  for (const f of git('ls-files', '-z').toString().split('\0')) if (WANT.test(f) && !skip.has(f)) map[f] = sha(git('cat-file', 'blob', 'HEAD:' + f));
+}
+const sorted = Object.fromEntries(Object.entries(map).sort(([a], [b]) => (a < b ? -1 : 1)));
+if (!Object.keys(sorted).length) { console.error('no files found to hash'); process.exit(1); }
+const id = tag + '-' + sha(Object.entries(sorted).map(([k, v]) => k + ':' + v).join('\n')).slice(0, 12);
 
 let old = {};
 const abs = resolve(out);
 if (existsSync(abs)) { try { old = (await import(pathToFileURL(abs).href + '?t=' + Date.now())).BUILDS || {}; } catch (_) { /* first run */ } }
-const builds = { [id]: map };
-for (const [k, v] of Object.entries(old)) if (k !== id && Object.keys(builds).length < KEEP) builds[k] = v;
+const tagOf = (k) => (/^(web|desktop|android)-/.test(k) ? k.split('-')[0] : 'web'); // older unprefixed ids are web builds
+const count = {};
+const builds = {};
+const add = (k, v) => { const t = tagOf(k); if ((count[t] || 0) >= KEEP || builds[k]) return; count[t] = (count[t] || 0) + 1; builds[k] = v; };
+add(id, sorted);
+for (const [k, v] of Object.entries(old)) add(k, v);
 writeFileSync(abs, `// generated by tools/make-manifest.mjs - do not edit by hand\nexport const BUILDS = ${JSON.stringify(builds, null, 1)};\n`);
-console.log(`build ${id}: ${files.length} files, ${Object.keys(builds).length} build(s) accepted -> ${out}`);
+console.log(`${id}: ${Object.keys(sorted).length} files; accepted builds: ${Object.keys(builds).join(', ')}`);
